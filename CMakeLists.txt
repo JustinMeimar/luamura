@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_package(LLVM REQUIRED CONFIG)
-llvm_map_components_to_libnames(LLVM_LIBS core support)
+llvm_map_components_to_libnames(LLVM_LIBS core support passes)
 
 # Lua, statically: compiled code uses its internal symbols.
 file(GLOB LUA_SOURCES CONFIGURE_DEPENDS src/*.c)
@@ -28,7 +28,8 @@ target_link_libraries(lua PRIVATE liblua)
 set_target_properties(lua PROPERTIES ENABLE_EXPORTS ON)
 
 add_executable(luamura
-    src/luamura/compiler/main.cpp src/luamura/compiler/emit.cpp)
+    src/luamura/compiler/main.cpp src/luamura/compiler/emit.cpp
+    src/luamura/compiler/ssa.cpp)
 target_include_directories(luamura PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(luamura PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(luamura PRIVATE ${LLVM_LIBS} liblua)

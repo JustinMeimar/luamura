@@ -22,8 +22,16 @@
  * call for luaV_execute to run: a Lua function it called, its caller
  * after it returned, or NULL after returning from a fresh call. Calls
  * to Lua functions therefore return to luaV_execute, and the caller
- * later continues from its saved pc: after a return, a yield, or in the
- * interpreter when hooks have been set meanwhile.
+ * later continues from its saved pc. An implementation resumes at the
+ * function's start and after calls; it returns ci itself to have the
+ * interpreter continue from any other pc, or when hooks have been set
+ * meanwhile. A tail call to a compiled function enters its
+ * implementation directly, as a tail call in C.
+ *
+ * Compiled code keeps registers in SSA values between the instructions
+ * it computes itself. Before any other instruction, which runs its
+ * lvm.c body on the frame and may call Lua, it writes back registers
+ * that changed, and it loads registers from the frame again after.
  *
  * Errors, the collector, debug information and coroutines behave as for
  * interpreted functions, because the state they inspect is the same.

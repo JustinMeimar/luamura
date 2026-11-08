@@ -301,6 +301,13 @@
 
 const Instruction* lm_code(CallInfo* ci) { return ci_func(ci)->p->code; }
 
+const TValue* lm_constants(CallInfo* ci) { return ci_func(ci)->p->k; }
+
+/* The implementation to run ci with, or NULL to interpret it. */
+lua_AotFunction lm_compiled(lua_State* L, CallInfo* ci) {
+    return L->hookmask ? NULL : ci_func(ci)->p->aot;
+}
+
 int lm_resume(CallInfo* ci) {
     return cast_int(ci->u.l.savedpc - ci_func(ci)->p->code);
 }
@@ -1067,7 +1074,7 @@ CALLOP(TAILCALL) {
     lua_assert(base == ci->func.p + 1);
   }
   if ((n = luaD_pretailcall(L, ci, ra, b, delta)) < 0)  /* Lua function? */
-    return ci;  /* run the callee in this call */
+    return ci;  /* the callee runs in this call */
   ci->func.p -= delta;  /* restore 'func' (if vararg) */
   luaD_poscall(L, ci, n);  /* finish caller */
   return returned(ci);
