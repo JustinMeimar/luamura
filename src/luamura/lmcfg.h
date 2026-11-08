@@ -5,20 +5,25 @@
 
 #include <vector>
 
-// The control-flow graph of a function's bytecode.
-namespace cfg {
+// The control-flow graph of a function's bytecode, with the blocks Lua
+// can reach, in pc order.
+class CFG {
+public:
+    struct Block {
+        int start;
+        int end;
+        // indices in blocks, the most common first
+        std::vector<int> successors;
 
-// The pcs the instruction at 'pc' may continue at, the most common
-// first.
-std::vector<int> successors(const Proto* proto, int pc);
+        int last() const { return end - 1; }
+    };
 
-// Whether each pc starts a basic block.
-std::vector<bool> leaders(const Proto* proto);
+    explicit CFG(const Proto* proto);
 
-// Where Lua may enter the function: its start, and after each call,
-// once the callee returns.
-std::vector<int> entries(const Proto* proto);
-
-} // namespace cfg
+    std::vector<Block> blocks;
+    // The blocks where Lua may enter the function: its start, and after
+    // each call, once the callee returns.
+    std::vector<int> entries;
+};
 
 #endif // LMCFG_H

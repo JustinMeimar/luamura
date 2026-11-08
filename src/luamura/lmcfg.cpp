@@ -1,6 +1,6 @@
 #include "lmcfg.h"
 
-namespace cfg {
+#include <algorithm>
 
 namespace {
 
@@ -47,8 +47,8 @@ std::vector<int> offsets(const Proto* p, int pc) {
 
 bool is_call(OpCode op) { return op == OP_CALL || op == OP_TFORCALL; }
 
-} // namespace
-
+// The pcs the instruction at 'pc' may continue at, the most common
+// first.
 std::vector<int> successors(const Proto* proto, int pc) {
     Instruction i = proto->code[pc];
     switch (GET_OPCODE(i)) {
@@ -69,6 +69,8 @@ std::vector<int> successors(const Proto* proto, int pc) {
     return next;
 }
 
+// A block ends where control may go anywhere but the next instruction,
+// and after calls, where Lua resumes the function.
 std::vector<bool> leaders(const Proto* proto) {
     int n = proto->sizecode;
     std::vector<bool> leader(n, false);
@@ -86,12 +88,42 @@ std::vector<bool> leaders(const Proto* proto) {
     return leader;
 }
 
-std::vector<int> entries(const Proto* proto) {
-    std::vector<int> pcs = {0};
-    for (int pc = 0; pc + 1 < proto->sizecode; pc++)
-        if (is_call(GET_OPCODE(proto->code[pc])))
-            pcs.push_back(pc + 1);
-    return pcs;
-}
+} // namespace
 
-} // namespace cfg
+CFG::CFG(const Proto* proto) {
+    int n = proto->sizecode;
+    std::vector<bool> leader = leaders(proto);
+    auto end_of = [&](int start) {
+        return static_cast<int>(
+            std::find(leader.begin() + start + 1, leader.end(), true) -
+            leader.begin());
+    };
+
+    std::vector<bool> reached(n, false);
+    std::vector<int> work = {0};
+    while (!work.empty()) {
+        int start = work.back();
+        work.pop_back();
+        if (reached[start])
+            continue;
+        reached[start] = true;
+        for (int s : successors(proto, end_of(start) - 1))
+            work.push_back(s);
+    }
+
+    // the block starting at each pc, or -1
+    std::vector<int> index(n, -1);
+    for (int pc = 0; pc < n; pc++) {
+        if (!reached[pc])
+            continue;
+        index[pc] = static_cast<int>(blocks.size());
+        blocks.push_back({pc, end_of(pc), {}});
+    }
+    entries.push_back(0);
+    for (Block& b : blocks) {
+        for (int s : successors(proto, b.last()))
+            b.successors.push_back(index[s]);
+        if (is_call(GET_OPCODE(proto->code[b.last()])))
+            entries.push_back(b.successors.front());
+    }
+}

@@ -92,7 +92,7 @@ int main(int argc, char* argv[]) {
     lua_dump(L, append, &chunk, 0);
 
     llvm::LLVMContext context;
-    auto module = compile(context, main, chunk);
+    auto module = compile_module(context, main, chunk);
     lua_close(L);
     if (llvm::verifyModule(*module, &llvm::errs()) || !link_lvm(*module))
         return 1;

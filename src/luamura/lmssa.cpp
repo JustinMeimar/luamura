@@ -65,7 +65,8 @@ void operands(Instruction i, std::vector<int>& uses,
 
 class Builder {
 public:
-    explicit Builder(Function& function) : function(function) {}
+    explicit Builder(Function& function)
+        : function(function), cfg(function.proto) {}
 
     void build();
 
@@ -99,7 +100,6 @@ private:
     }
 
     void form_blocks();
-    void prune();
     void find_resumes();
     void find_dirty();
     void fill(Block* b);
@@ -112,48 +112,16 @@ private:
     Value* try_remove_trivial(Value* phi);
 
     Function& function;
+    CFG cfg;
 };
 
+// The blocks of the CFG, with the same indices.
 void Builder::form_blocks() {
-    const Proto* p = function.proto;
-    int n = p->sizecode;
-    std::vector<bool> leader = cfg::leaders(p);
-    function.at.assign(n, nullptr);
-    for (int pc = 0; pc < n;) {
-        int end = pc + 1;
-        while (end < n && !leader[end])
-            end++;
-        function.at[pc] = block(pc, end);
-        pc = end;
-    }
-    for (auto& b : function.blocks)
-        for (int s : cfg::successors(p, b->end - 1))
-            edge(b.get(), function.at[s]);
-}
-
-// Removes the edges of blocks that never run, such as the jumps after
-// test instructions, which branch to the jump's target themselves.
-void Builder::prune() {
-    std::vector<bool> reached(function.blocks.size(), false);
-    std::vector<Block*> work;
-    for (int pc : cfg::entries(function.proto))
-        work.push_back(function.at[pc]);
-    while (!work.empty()) {
-        Block* b = work.back();
-        work.pop_back();
-        if (reached[b->id])
-            continue;
-        reached[b->id] = true;
-        work.insert(work.end(), b->succs.begin(), b->succs.end());
-    }
-    for (auto& b : function.blocks) {
-        if (reached[b->id])
-            continue;
-        for (Block* s : b->succs)
-            s->preds.erase(
-                std::find(s->preds.begin(), s->preds.end(), b.get()));
-        b->succs.clear();
-    }
+    for (const CFG::Block& b : cfg.blocks)
+        block(b.start, b.end);
+    for (size_t b = 0; b < cfg.blocks.size(); b++)
+        for (int s : cfg.blocks[b].successors)
+            edge(function.blocks[b].get(), function.blocks[s].get());
 }
 
 // A block can start with registers in the frame if every predecessor
@@ -161,8 +129,9 @@ void Builder::prune() {
 // enters a block of its own.
 void Builder::find_resumes() {
     const Proto* p = function.proto;
-    for (int pc : cfg::entries(function.proto)) {
-        Block* target = function.at[pc];
+    for (int e : cfg.entries) {
+        Block* target = function.blocks[e].get();
+        int pc = target->start;
         bool in_frame = std::all_of(
             target->preds.begin(), target->preds.end(),
             [&](Block* pred) { return !computed(p, pred->end - 1); });
@@ -327,7 +296,6 @@ void Builder::remove_trivial_phis() {
 
 void Builder::build() {
     form_blocks();
-    prune();
     find_resumes();
     find_dirty();
     auto seal_ready = [&] {

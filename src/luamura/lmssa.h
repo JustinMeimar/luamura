@@ -72,8 +72,6 @@ struct Function {
     const Proto* proto;
     std::vector<std::unique_ptr<Block>> blocks;
     std::vector<std::unique_ptr<Value>> values;
-    // the block starting at each pc, or null
-    std::vector<Block*> at;
     // resume pcs and the blocks that start them
     std::vector<std::pair<int, Block*>> resumes;
 };

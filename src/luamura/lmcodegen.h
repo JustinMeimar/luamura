@@ -10,10 +10,10 @@
 #include <string>
 
 // The baseline compiler. Each function of the chunk becomes a native
-// function that runs its instructions on the Lua stack: some inline, the
-// others by calling lvm.c's function for the instruction.
-std::unique_ptr<llvm::Module> compile(llvm::LLVMContext& context,
-                                      const Proto* main,
-                                      const std::string& chunk);
+// function that runs its instructions on the Lua stack, with lvm.c's
+// function for each instruction.
+std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
+                                             const Proto* main,
+                                             const std::string& chunk);
 
 #endif // LMCODEGEN_H
