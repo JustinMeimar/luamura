@@ -195,22 +195,23 @@ void FunctionCompiler::tail_call(llvm::Value* next) {
     builder.CreateRet(call);
 }
 
+// The runtime attaches the functions to the chunk's Protos in preorder.
+void compile_function(llvm::Module& module, const Proto* p,
+                      std::vector<llvm::Constant*>& functions) {
+    std::string name = "lm_function_" + std::to_string(functions.size());
+    functions.push_back(FunctionCompiler(module, p).compile(name));
+    for (int i = 0; i < p->sizep; i++)
+        compile_function(module, p->p[i], functions);
+}
+
 } // namespace
 
-// The runtime attaches the functions to the chunk's Protos in preorder.
 std::unique_ptr<llvm::Module> compile(llvm::LLVMContext& context,
                                       const Proto* main,
                                       const std::string& chunk) {
     auto module = std::make_unique<llvm::Module>("luamura", context);
     std::vector<llvm::Constant*> functions;
-    auto compile_all = [&](auto& self, const Proto* p) -> void {
-        std::string name =
-            "lm_function_" + std::to_string(functions.size());
-        functions.push_back(FunctionCompiler(*module, p).compile(name));
-        for (int i = 0; i < p->sizep; i++)
-            self(self, p->p[i]);
-    };
-    compile_all(compile_all, main);
+    compile_function(*module, main, functions);
 
     auto define = [&](llvm::Constant* value, const char* name) {
         new llvm::GlobalVariable(*module, value->getType(), true,
