@@ -23,6 +23,9 @@ public:
 
 private:
     void instruction(int pc);
+    llvm::Value* run(int pc);
+    void branch(int pc);
+    void after_call(int pc, llvm::Value* next);
     void tail_call(llvm::Value* next);
     llvm::Value* hooked();
     llvm::BasicBlock* new_block(const std::string& name) {
@@ -89,52 +92,54 @@ llvm::Function* FunctionCompiler::compile(const std::string& name) {
     return function;
 }
 
-// lvm.c's function for the instruction runs it on the stack, and leaves
-// in pc where the function continues. Inlined with the instruction as a
-// constant, it reduces to what the interpreter does for that instruction
-// alone. Calls and returns give the next call for luaV_execute to run.
+// Each instruction runs as the interpreter would run it, then control
+// goes where the interpreter would go next.
 void FunctionCompiler::instruction(int pc) {
-    Instruction i = proto->code[pc];
-    OpCode op = GET_OPCODE(i);
+    OpCode op = GET_OPCODE(proto->code[pc]);
+    // an operand of the instruction before it, never run
     if (op == OP_EXTRAARG) {
         builder.CreateUnreachable();
         return;
     }
-    auto* ptr = builder.getPtrTy();
-    builder.CreateStore(builder.CreateConstInBoundsGEP1_32(
-                            builder.getInt32Ty(), code, pc + 1),
-                        pc_address);
-    auto* next = builder.CreateCall(
-        runtime(std::string("luaV_OP_") + opnames[op], ptr,
-                {ptr, ptr, ptr, builder.getInt32Ty()}),
-        {L, ci, pc_address, builder.getInt32(i)});
-    next->addFnAttr(llvm::Attribute::AlwaysInline);
+
+    llvm::Value* next = run(pc);
 
     switch (op) {
-    case OP_CALL: {
-        // a C function returned here, and may have set hooks, which only
-        // the interpreter runs
-        auto* returned = new_block("returned");
-        auto* called = new_block("called");
-        builder.CreateCondBr(builder.CreateIsNull(next), returned, called);
-        builder.SetInsertPoint(called);
-        builder.CreateRet(next);
-        builder.SetInsertPoint(returned);
-        builder.CreateCondBr(hooked(), interpret, blocks[pc + 1]);
-        return;
-    }
+    case OP_CALL:
+        return after_call(pc, next);
     case OP_TAILCALL:
-        tail_call(next);
-        return;
+        return tail_call(next);
     case OP_RETURN:
     case OP_RETURN0:
     case OP_RETURN1:
         builder.CreateRet(next);
         return;
     default:
-        break;
+        return branch(pc);
     }
+}
 
+// Calls lvm.c's function for the instruction, which LLVM inlines. With
+// the instruction a constant, what remains is the interpreter's work for
+// this instruction alone: the dispatch and decoding fold away.
+llvm::Value* FunctionCompiler::run(int pc) {
+    Instruction i = proto->code[pc];
+    auto* ptr = builder.getPtrTy();
+    auto* i32 = builder.getInt32Ty();
+    // the interpreter's pc after fetching i
+    builder.CreateStore(
+        builder.CreateConstInBoundsGEP1_32(i32, code, pc + 1), pc_address);
+    auto* next = builder.CreateCall(
+        runtime(std::string("luaV_OP_") + opnames[GET_OPCODE(i)], ptr,
+                {ptr, ptr, ptr, i32}),
+        {L, ci, pc_address, builder.getInt32(i)});
+    next->addFnAttr(llvm::Attribute::AlwaysInline);
+    return next;
+}
+
+// The instruction left in pc where to continue. Where it has a single
+// successor, pc is not needed.
+void FunctionCompiler::branch(int pc) {
     std::vector<int> targets = cfg::successors(proto, pc);
     if (targets.size() == 1) {
         if (targets[0] != pc + 1)
@@ -142,13 +147,23 @@ void FunctionCompiler::instruction(int pc) {
         return;
     }
     auto* moved = builder.CreatePtrDiff(
-        builder.getInt32Ty(), builder.CreateLoad(ptr, pc_address), code);
-    auto* to =
-        builder.CreateSwitch(moved, blocks[targets[0]], targets.size() - 1);
-    auto* type = llvm::cast<llvm::IntegerType>(moved->getType());
+        builder.getInt32Ty(),
+        builder.CreateLoad(builder.getPtrTy(), pc_address), code);
+    auto* to = builder.CreateSwitch(moved, blocks[targets[0]]);
     for (size_t n = 1; n < targets.size(); n++)
-        to->addCase(llvm::ConstantInt::get(type, targets[n]),
-                    blocks[targets[n]]);
+        to->addCase(builder.getInt64(targets[n]), blocks[targets[n]]);
+}
+
+// A Lua callee is left for luaV_execute to run. A C function returned
+// here, and may have set hooks, which only the interpreter runs.
+void FunctionCompiler::after_call(int pc, llvm::Value* next) {
+    auto* returned = new_block("returned");
+    auto* called = new_block("called");
+    builder.CreateCondBr(builder.CreateIsNull(next), returned, called);
+    builder.SetInsertPoint(called);
+    builder.CreateRet(next);
+    builder.SetInsertPoint(returned);
+    builder.CreateCondBr(hooked(), interpret, blocks[pc + 1]);
 }
 
 // A Lua callee replaces this function in ci. Entering its native code
