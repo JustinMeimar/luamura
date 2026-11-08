@@ -35,10 +35,6 @@
  * interpreted functions, because the state they inspect is the same.
  */
 
-// lvm.c's function for each instruction, luaV_OP_ and its name
-typedef CallInfo* (*lm_OpFunction)(lua_State* L, CallInfo* ci,
-                                   const Instruction** pc, Instruction i);
-
 // What compiled code calls.
 const Instruction* lm_code(CallInfo* ci);
 int lm_resume(CallInfo* ci);
