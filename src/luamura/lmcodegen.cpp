@@ -19,104 +19,148 @@ extern "C" {
 
 namespace {
 
-class FunctionCompiler {
-public:
-    FunctionCompiler(llvm::Module& module, const Proto* proto)
-        : module(module), proto(proto), cfg(proto),
-          builder(module.getContext()) {}
+// What luaV_execute keeps while running a function.
+struct Frame {
+    llvm::Value* L = nullptr;
+    llvm::Value* ci = nullptr;
+    // the function's instructions, and the address of its pc
+    llvm::Value* code = nullptr;
+    llvm::Value* pc = nullptr;
+};
 
-    llvm::Function* compile(const std::string& name);
+// The Futamura projection of a block: luaV_execute specialized to the
+// block's instructions. Each instruction calls lvm.c's function for it
+// with the instruction as a constant, and LLVM inlines the call. What
+// remains is the interpreter's work for that instruction alone, without
+// fetching, decoding or dispatch.
+class BlockCompiler {
+public:
+    BlockCompiler(llvm::IRBuilder<>& builder, const Proto& proto,
+                  const Frame& frame)
+        : builder(builder), proto(proto), frame(frame) {}
+
+    // Returns what the block's last instruction returned: the next call
+    // for luaV_execute to run, if any.
+    llvm::Value* compile(const CFG::Block& block);
 
 private:
     llvm::Value* run(int pc);
+
+    llvm::IRBuilder<>& builder;
+    const Proto& proto;
+    Frame frame;
+};
+
+llvm::Value* BlockCompiler::compile(const CFG::Block& block) {
+    llvm::Value* next = nullptr;
+    for (int pc = block.start; pc < block.end; pc++)
+        next = run(pc);
+    return next;
+}
+
+llvm::Value* BlockCompiler::run(int pc) {
+    Instruction i = proto.code[pc];
+    // the interpreter's pc after fetching i
+    builder.CreateStore(builder.CreateConstInBoundsGEP1_32(
+                            builder.getInt32Ty(), frame.code, pc + 1),
+                        frame.pc);
+    llvm::Module& module = *builder.GetInsertBlock()->getModule();
+    auto* ptr = builder.getPtrTy();
+    auto* call = builder.CreateCall(
+        module.getOrInsertFunction(
+            std::string("luaV_OP_") + opnames[GET_OPCODE(i)], ptr, ptr, ptr,
+            ptr, builder.getInt32Ty()),
+        {frame.L, frame.ci, frame.pc, builder.getInt32(i)});
+    call->addFnAttr(llvm::Attribute::AlwaysInline);
+    return call;
+}
+
+// Compiles a Lua function to a native function whose control flow
+// mirrors its CFG: an LLVM block for each of the CFG's blocks, ending
+// where the interpreter would continue.
+class FunctionCompiler {
+public:
+    FunctionCompiler(llvm::Module& module, const Proto& proto)
+        : module(module), proto(proto), cfg(&proto),
+          builder(module.getContext()) {}
+
+    llvm::Function* compile(const llvm::Twine& name);
+
+private:
+    void enter();
     void terminate(const CFG::Block& block, llvm::Value* next);
     void to_successors(const CFG::Block& block);
     void after_call(llvm::Value* next, llvm::BasicBlock* successor);
     void tail_call(llvm::Value* next);
-    llvm::BasicBlock* new_block(const llvm::Twine& name = "") {
+    llvm::BasicBlock* create_block(const llvm::Twine& name = "") {
         return llvm::BasicBlock::Create(module.getContext(), name,
                                         function);
     }
 
     llvm::Module& module;
-    const Proto* proto;
+    const Proto& proto;
     CFG cfg;
     llvm::IRBuilder<> builder;
     llvm::Function* function = nullptr;
-    llvm::Value* L = nullptr;
-    llvm::Value* ci = nullptr;
-    llvm::Value* code = nullptr;
-    llvm::Value* pc_address = nullptr;
+    Frame frame;
+    // the LLVM block for each of cfg's blocks
+    std::vector<llvm::BasicBlock*> llvm_blocks;
+    // returns to luaV_execute, to interpret from the saved pc
     llvm::BasicBlock* interpret = nullptr;
-    // one for each of cfg's blocks
-    std::vector<llvm::BasicBlock*> blocks;
 };
 
-llvm::Function* FunctionCompiler::compile(const std::string& name) {
+llvm::Function* FunctionCompiler::compile(const llvm::Twine& name) {
     auto* ptr = builder.getPtrTy();
     function = llvm::Function::Create(
         llvm::FunctionType::get(ptr, {ptr, ptr}, false),
         llvm::GlobalValue::InternalLinkage, name, module);
-    L = function->getArg(0);
-    ci = function->getArg(1);
+    frame.L = function->getArg(0);
+    frame.ci = function->getArg(1);
 
-    auto* entry = new_block();
-    interpret = new_block();
+    auto* entry = create_block();
+    interpret = create_block();
     // named for reading the IR against the bytecode
-    for (const CFG::Block& b : cfg.blocks)
-        blocks.push_back(new_block("pc" + llvm::Twine(b.start)));
+    for (const CFG::Block& block : cfg.blocks)
+        llvm_blocks.push_back(
+            create_block("pc" + llvm::Twine(block.start)));
 
     builder.SetInsertPoint(interpret);
-    builder.CreateRet(ci);
-
+    builder.CreateRet(frame.ci);
     builder.SetInsertPoint(entry);
-    pc_address = builder.CreateAlloca(ptr);
-    code = builder.CreateCall(
-        module.getOrInsertFunction(NAME(lm_code), ptr, ptr), {ci});
-    auto* saved =
-        builder.CreateCall(module.getOrInsertFunction(
-                               NAME(lm_resume), builder.getInt32Ty(), ptr),
-                           {ci});
-    auto* resume = builder.CreateSwitch(saved, interpret);
-    for (int e : cfg.entries)
-        resume->addCase(builder.getInt32(cfg.blocks[e].start), blocks[e]);
+    enter();
 
-    for (size_t b = 0; b < cfg.blocks.size(); b++) {
-        builder.SetInsertPoint(blocks[b]);
-        llvm::Value* next = nullptr;
-        for (int pc = cfg.blocks[b].start; pc < cfg.blocks[b].end; pc++)
-            next = run(pc);
-        terminate(cfg.blocks[b], next);
+    BlockCompiler block_compiler(builder, proto, frame);
+    for (auto [block, llvm_block] :
+         llvm::zip_equal(cfg.blocks, llvm_blocks)) {
+        builder.SetInsertPoint(llvm_block);
+        terminate(block, block_compiler.compile(block));
     }
     return function;
 }
 
-// Calls lvm.c's function for the instruction, which LLVM inlines. With
-// the instruction a constant, what remains is the interpreter's work for
-// this instruction alone: the dispatch and decoding fold away.
-llvm::Value* FunctionCompiler::run(int pc) {
-    Instruction i = proto->code[pc];
-    // the interpreter's pc after fetching i
-    builder.CreateStore(builder.CreateConstInBoundsGEP1_32(
-                            builder.getInt32Ty(), code, pc + 1),
-                        pc_address);
+// Resumes at the saved pc: the function's start, or after a call.
+void FunctionCompiler::enter() {
     auto* ptr = builder.getPtrTy();
-    auto* next = builder.CreateCall(
-        module.getOrInsertFunction(
-            std::string("luaV_OP_") + opnames[GET_OPCODE(i)], ptr, ptr, ptr,
-            ptr, builder.getInt32Ty()),
-        {L, ci, pc_address, builder.getInt32(i)});
-    next->addFnAttr(llvm::Attribute::AlwaysInline);
-    return next;
+    frame.pc = builder.CreateAlloca(ptr);
+    frame.code = builder.CreateCall(
+        module.getOrInsertFunction(NAME(lm_code), ptr, ptr), {frame.ci});
+    auto* saved =
+        builder.CreateCall(module.getOrInsertFunction(
+                               NAME(lm_resume), builder.getInt32Ty(), ptr),
+                           {frame.ci});
+    auto* resume = builder.CreateSwitch(saved, interpret);
+    for (int e : cfg.entries)
+        resume->addCase(builder.getInt32(cfg.blocks[e].start),
+                        llvm_blocks[e]);
 }
 
-// Control goes where the interpreter would go after the block's last
-// instruction, whose function returned next.
+// Continues where the interpreter would after the block's last
+// instruction, which returned next.
 void FunctionCompiler::terminate(const CFG::Block& block,
                                  llvm::Value* next) {
-    switch (GET_OPCODE(proto->code[block.last()])) {
+    switch (GET_OPCODE(proto.code[block.last()])) {
     case OP_CALL:
-        return after_call(next, blocks[block.successors.front()]);
+        return after_call(next, llvm_blocks[block.successors.front()]);
     case OP_TAILCALL:
         return tail_call(next);
     case OP_RETURN:
@@ -133,15 +177,15 @@ void FunctionCompiler::terminate(const CFG::Block& block,
 void FunctionCompiler::to_successors(const CFG::Block& block) {
     const std::vector<int>& targets = block.successors;
     if (targets.size() == 1) {
-        builder.CreateBr(blocks[targets.front()]);
+        builder.CreateBr(llvm_blocks[targets.front()]);
         return;
     }
     auto* moved = builder.CreatePtrDiff(
         builder.getInt32Ty(),
-        builder.CreateLoad(builder.getPtrTy(), pc_address), code);
-    auto* to = builder.CreateSwitch(moved, blocks[targets.front()]);
+        builder.CreateLoad(builder.getPtrTy(), frame.pc), frame.code);
+    auto* to = builder.CreateSwitch(moved, llvm_blocks[targets.front()]);
     for (int t : llvm::drop_begin(targets))
-        to->addCase(builder.getInt64(cfg.blocks[t].start), blocks[t]);
+        to->addCase(builder.getInt64(cfg.blocks[t].start), llvm_blocks[t]);
 }
 
 // A Lua callee is left for luaV_execute to run. A C function returned
@@ -149,8 +193,8 @@ void FunctionCompiler::to_successors(const CFG::Block& block) {
 // the interpreter runs.
 void FunctionCompiler::after_call(llvm::Value* next,
                                   llvm::BasicBlock* successor) {
-    auto* returned = new_block();
-    auto* called = new_block();
+    auto* returned = create_block();
+    auto* called = create_block();
     builder.CreateCondBr(builder.CreateIsNull(next), returned, called);
     builder.SetInsertPoint(called);
     builder.CreateRet(next);
@@ -160,7 +204,7 @@ void FunctionCompiler::after_call(llvm::Value* next,
     auto* hookmask = builder.CreateLoad(
         builder.getInt32Ty(),
         builder.CreateInBoundsPtrAdd(
-            L, builder.getInt64(offsetof(lua_State, hookmask))),
+            frame.L, builder.getInt64(offsetof(lua_State, hookmask))),
         true);
     builder.CreateCondBr(builder.CreateIsNotNull(hookmask), interpret,
                          successor);
@@ -169,10 +213,11 @@ void FunctionCompiler::after_call(llvm::Value* next,
 // A Lua callee replaces this function in ci. Entering its native code
 // as a tail call keeps the C stack from growing.
 void FunctionCompiler::tail_call(llvm::Value* next) {
-    auto* callee = new_block();
-    auto* compiled = new_block();
-    auto* done = new_block();
-    builder.CreateCondBr(builder.CreateICmpEQ(next, ci), callee, done);
+    auto* callee = create_block();
+    auto* compiled = create_block();
+    auto* done = create_block();
+    builder.CreateCondBr(builder.CreateICmpEQ(next, frame.ci), callee,
+                         done);
     builder.SetInsertPoint(done);
     builder.CreateRet(next);
 
@@ -180,38 +225,40 @@ void FunctionCompiler::tail_call(llvm::Value* next) {
     auto* ptr = builder.getPtrTy();
     auto* native = builder.CreateCall(
         module.getOrInsertFunction(NAME(lm_compiled), ptr, ptr, ptr),
-        {L, ci});
+        {frame.L, frame.ci});
     builder.CreateCondBr(builder.CreateIsNull(native), done, compiled);
     builder.SetInsertPoint(compiled);
-    auto* call =
-        builder.CreateCall(function->getFunctionType(), native, {L, ci});
+    auto* call = builder.CreateCall(function->getFunctionType(), native,
+                                    {frame.L, frame.ci});
     call->setTailCallKind(llvm::CallInst::TCK_MustTail);
     builder.CreateRet(call);
 }
 
-// The runtime attaches the functions to the chunk's Protos in preorder.
-void compile_function(llvm::Module& module, const Proto* p,
-                      std::vector<llvm::Constant*>& functions) {
-    std::string name = "lm_function_" + std::to_string(functions.size());
-    functions.push_back(FunctionCompiler(module, p).compile(name));
-    for (int i = 0; i < p->sizep; i++)
-        compile_function(module, p->p[i], functions);
-}
+// Compiles a chunk's functions, and defines what the runtime loads.
+class ModuleCompiler {
+public:
+    explicit ModuleCompiler(llvm::LLVMContext& context)
+        : module(std::make_unique<llvm::Module>("luamura", context)) {}
 
-} // namespace
+    std::unique_ptr<llvm::Module> compile(const Proto& main,
+                                          const std::string& chunk);
 
-std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
-                                             const Proto* main,
-                                             const std::string& chunk) {
-    auto module = std::make_unique<llvm::Module>("luamura", context);
-    std::vector<llvm::Constant*> functions;
-    compile_function(*module, main, functions);
-
-    auto define = [&](const char* name, llvm::Constant* value) {
+private:
+    void compile_function(const Proto& proto);
+    void define(const char* name, llvm::Constant* value) {
         new llvm::GlobalVariable(*module, value->getType(), true,
                                  llvm::GlobalValue::ExternalLinkage, value,
                                  name);
-    };
+    }
+
+    std::unique_ptr<llvm::Module> module;
+    std::vector<llvm::Constant*> functions;
+};
+
+std::unique_ptr<llvm::Module>
+ModuleCompiler::compile(const Proto& main, const std::string& chunk) {
+    compile_function(main);
+    llvm::LLVMContext& context = module->getContext();
     define(NAME(lm_chunk),
            llvm::ConstantDataArray::getString(context, chunk, false));
     define(NAME(lm_chunk_size),
@@ -225,5 +272,22 @@ std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
     define(NAME(lm_nfunctions),
            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context),
                                   functions.size()));
-    return module;
+    return std::move(module);
+}
+
+// The runtime attaches the functions to the chunk's Protos in preorder.
+void ModuleCompiler::compile_function(const Proto& proto) {
+    functions.push_back(
+        FunctionCompiler(*module, proto)
+            .compile("lm_function_" + llvm::Twine(functions.size())));
+    for (const Proto* nested : llvm::ArrayRef(proto.p, proto.sizep))
+        compile_function(*nested);
+}
+
+} // namespace
+
+std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
+                                             const Proto* main,
+                                             const std::string& chunk) {
+    return ModuleCompiler(context).compile(*main, chunk);
 }

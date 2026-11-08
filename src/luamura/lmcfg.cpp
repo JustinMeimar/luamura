@@ -4,11 +4,24 @@
 
 namespace {
 
-// How far past itself the instruction at 'pc' may move pc.
-std::vector<int> offsets(const Proto* p, int pc) {
+bool is_call(OpCode op) { return op == OP_CALL || op == OP_TFORCALL; }
+
+// The pcs the instruction at 'pc' may continue at, the most common
+// first.
+std::vector<int> successors(const Proto* p, int pc) {
     Instruction i = p->code[pc];
     OpCode op = GET_OPCODE(i);
+    int next = pc + 1;
     switch (op) {
+    case OP_JMP:
+        return {next + GETARG_sJ(i)};
+    case OP_RETURN:
+    case OP_RETURN0:
+    case OP_RETURN1:
+    case OP_TAILCALL:
+    case OP_EXTRAARG:
+        return {};
+    // a test either takes the jump after it or skips it
     case OP_EQ:
     case OP_LT:
     case OP_LE:
@@ -20,53 +33,33 @@ std::vector<int> offsets(const Proto* p, int pc) {
     case OP_GEI:
     case OP_TEST:
     case OP_TESTSET: {
-        int jump = GETARG_sJ(p->code[pc + 1]) + 1;
-        if (jump == 1)
-            return {1};
-        return {jump, 1};
+        int skip = next + 1;
+        int jump = skip + GETARG_sJ(p->code[next]);
+        if (jump == skip)
+            return {skip};
+        return {jump, skip};
     }
     case OP_FORLOOP:
     case OP_TFORLOOP:
-        return {-GETARG_Bx(i), 0};
+        return {next - GETARG_Bx(i), next};
     case OP_FORPREP:
-        return {0, GETARG_Bx(i) + 1};
+        return {next, next + GETARG_Bx(i) + 1};
     case OP_TFORPREP:
-        return {GETARG_Bx(i)};
+        return {next + GETARG_Bx(i)};
+    // these skip the instruction after them
     case OP_LOADKX:
     case OP_NEWTABLE:
     case OP_LFALSESKIP:
-        return {1};
+        return {next + 1};
     case OP_SETLIST:
-        return {TESTARG_k(i) ? 1 : 0};
+        return {TESTARG_k(i) ? next + 1 : next};
     default:
+        // arithmetic skips the metamethod call after it, unless its
+        // operands need one
         if (op >= OP_ADDI && op <= OP_SHR)
-            return {1, 0};
-        return {0};
+            return {next + 1, next};
+        return {next};
     }
-}
-
-bool is_call(OpCode op) { return op == OP_CALL || op == OP_TFORCALL; }
-
-// The pcs the instruction at 'pc' may continue at, the most common
-// first.
-std::vector<int> successors(const Proto* proto, int pc) {
-    Instruction i = proto->code[pc];
-    switch (GET_OPCODE(i)) {
-    case OP_JMP:
-        return {pc + 1 + GETARG_sJ(i)};
-    case OP_RETURN:
-    case OP_RETURN0:
-    case OP_RETURN1:
-    case OP_TAILCALL:
-    case OP_EXTRAARG:
-        return {};
-    default:
-        break;
-    }
-    std::vector<int> next;
-    for (int offset : offsets(proto, pc))
-        next.push_back(pc + 1 + offset);
-    return next;
 }
 
 // A block ends where control may go anywhere but the next instruction,
