@@ -2,7 +2,7 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "lmemit.h"
+#include "lmcodegen.h"
 #include "lmlua.h"
 #include "lmssa.h"
 
@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
     lua_dump(L, append, &chunk, 0);
 
     llvm::LLVMContext context;
-    auto module = emit_module(context, main, chunk);
+    auto module = compile(context, main, chunk);
     lua_close(L);
     if (llvm::verifyModule(*module, &llvm::errs()))
         return 1;

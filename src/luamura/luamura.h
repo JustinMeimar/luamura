@@ -28,10 +28,8 @@
  * meanwhile. A tail call to a compiled function enters its
  * implementation directly, as a tail call in C.
  *
- * Compiled code keeps registers in SSA values between the instructions
- * it computes itself. Before any other instruction, which runs its
- * lvm.c body on the frame and may call Lua, it writes back registers
- * that changed, and it loads registers from the frame again after.
+ * Compiled code keeps registers on the Lua stack. It runs simple
+ * instructions inline, and calls lvm.c's function for any other.
  *
  * Errors, the collector, debug information and coroutines behave as for
  * interpreted functions, because the state they inspect is the same.

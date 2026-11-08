@@ -19,7 +19,7 @@ LUA_CFLAGS= -DLUAMURA -Wno-unused-parameter -Wno-unused-but-set-parameter
 LUA_A= ../liblua.a
 LUA_T= ../lua
 LUAMURA_T= luamura
-LUAMURA_O= lmc.o lmemit.o lmssa.o
+LUAMURA_O= lmc.o lmcfg.o lmssa.o lmbuilder.o lmcodegen.o
 RT_O= lmrt.o
 
 TESTS= ../../tests
@@ -76,15 +76,21 @@ clean:
 
 .PHONY: all check check-internal check-lua-test clean FORCE
 
-lmc.o: lmc.cpp lmemit.h lmlua.h ../lauxlib.h ../luaconf.h ../lua.h \
+lmc.o: lmc.cpp lmcodegen.h lmlua.h ../lauxlib.h ../luaconf.h ../lua.h \
  ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h ../lstate.h ../ltm.h \
  ../lzio.h ../lmem.h lmssa.h
-lmemit.o: lmemit.cpp lmemit.h lmlua.h ../lauxlib.h ../luaconf.h ../lua.h \
+lmcfg.o: lmcfg.cpp lmcfg.h lmlua.h ../lauxlib.h ../luaconf.h ../lua.h \
  ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h ../lstate.h ../ltm.h \
- ../lzio.h ../lmem.h lmssa.h ../lopnames.h
+ ../lzio.h ../lmem.h
 lmssa.o: lmssa.cpp lmssa.h lmlua.h ../lauxlib.h ../luaconf.h ../lua.h \
  ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h ../lstate.h ../ltm.h \
- ../lzio.h ../lmem.h ../lopnames.h
+ ../lzio.h ../lmem.h lmcfg.h ../lopnames.h
+lmbuilder.o: lmbuilder.cpp lmbuilder.h lmlua.h ../lauxlib.h ../luaconf.h \
+ ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h ../lstate.h \
+ ../ltm.h ../lzio.h ../lmem.h
+lmcodegen.o: lmcodegen.cpp lmcodegen.h lmlua.h ../lauxlib.h ../luaconf.h \
+ ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h ../lstate.h \
+ ../ltm.h ../lzio.h ../lmem.h lmbuilder.h lmcfg.h ../lopnames.h
 lmrt.o: lmrt.c luamura.h ../lstate.h ../lua.h ../luaconf.h ../lobject.h \
  ../llimits.h ../ltm.h ../lzio.h ../lmem.h ../lauxlib.h ../ldebug.h \
  ../lfunc.h ../lualib.h

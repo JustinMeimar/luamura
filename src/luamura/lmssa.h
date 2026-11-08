@@ -83,9 +83,6 @@ std::unique_ptr<Function> lift(const Proto* proto);
 // Whether luamura computes the instruction at 'pc' on SSA values.
 bool computed(const Proto* proto, int pc);
 
-// The pcs the instruction at 'pc' may continue at.
-std::vector<int> successors(const Proto* proto, int pc);
-
 // Whether 'value' is known to equal the frame's copy of register 'reg'.
 bool in_frame(Value* value, int reg);
 

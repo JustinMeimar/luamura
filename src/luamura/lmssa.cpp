@@ -1,4 +1,5 @@
 #include "lmssa.h"
+#include "lmcfg.h"
 
 #include <algorithm>
 #include <set>
@@ -62,49 +63,6 @@ void operands(Instruction i, std::vector<int>& uses,
     }
 }
 
-// How far an instruction may move pc past itself, the most common first.
-std::vector<int> moves(const Proto* p, int pc) {
-    Instruction i = p->code[pc];
-    OpCode op = GET_OPCODE(i);
-    switch (op) {
-    case OP_EQ:
-    case OP_LT:
-    case OP_LE:
-    case OP_EQK:
-    case OP_EQI:
-    case OP_LTI:
-    case OP_LEI:
-    case OP_GTI:
-    case OP_GEI:
-    case OP_TEST:
-    case OP_TESTSET: {
-        int jump = GETARG_sJ(p->code[pc + 1]) + 1;
-        if (jump == 1)
-            return {1};
-        return {jump, 1};
-    }
-    case OP_FORLOOP:
-    case OP_TFORLOOP:
-        return {-GETARG_Bx(i), 0};
-    case OP_FORPREP:
-        return {0, GETARG_Bx(i) + 1};
-    case OP_TFORPREP:
-        return {GETARG_Bx(i)};
-    case OP_LOADKX:
-    case OP_NEWTABLE:
-    case OP_LFALSESKIP:
-        return {1};
-    case OP_SETLIST:
-        return {TESTARG_k(i) ? 1 : 0};
-    default:
-        if (op >= OP_ADDI && op <= OP_SHR)
-            return {1, 0};
-        return {0};
-    }
-}
-
-bool resumes_after(OpCode op) { return op == OP_CALL || op == OP_TFORCALL; }
-
 class Builder {
 public:
     explicit Builder(Function& function) : function(function) {}
@@ -140,7 +98,6 @@ private:
         to->preds.push_back(from);
     }
 
-    std::vector<int> resume_pcs() const;
     void form_blocks();
     void prune();
     void find_resumes();
@@ -160,18 +117,7 @@ private:
 void Builder::form_blocks() {
     const Proto* p = function.proto;
     int n = p->sizecode;
-    std::vector<bool> leader(n, false);
-    leader[0] = true;
-    for (int pc = 0; pc < n; pc++) {
-        std::vector<int> next = successors(p, pc);
-        bool falls = next.size() == 1 && next[0] == pc + 1;
-        if (!falls || resumes_after(GET_OPCODE(p->code[pc]))) {
-            for (int s : next)
-                leader[s] = true;
-            if (pc + 1 < n)
-                leader[pc + 1] = true;
-        }
-    }
+    std::vector<bool> leader = cfg::leaders(p);
     function.at.assign(n, nullptr);
     for (int pc = 0; pc < n;) {
         int end = pc + 1;
@@ -181,18 +127,8 @@ void Builder::form_blocks() {
         pc = end;
     }
     for (auto& b : function.blocks)
-        for (int s : successors(p, b->end - 1))
+        for (int s : cfg::successors(p, b->end - 1))
             edge(b.get(), function.at[s]);
-}
-
-// The function resumes at its start and after calls.
-std::vector<int> Builder::resume_pcs() const {
-    const Proto* p = function.proto;
-    std::vector<int> pcs = {0};
-    for (int pc = 0; pc + 1 < p->sizecode; pc++)
-        if (resumes_after(GET_OPCODE(p->code[pc])))
-            pcs.push_back(pc + 1);
-    return pcs;
 }
 
 // Removes the edges of blocks that never run, such as the jumps after
@@ -200,7 +136,7 @@ std::vector<int> Builder::resume_pcs() const {
 void Builder::prune() {
     std::vector<bool> reached(function.blocks.size(), false);
     std::vector<Block*> work;
-    for (int pc : resume_pcs())
+    for (int pc : cfg::entries(function.proto))
         work.push_back(function.at[pc]);
     while (!work.empty()) {
         Block* b = work.back();
@@ -225,7 +161,7 @@ void Builder::prune() {
 // enters a block of its own.
 void Builder::find_resumes() {
     const Proto* p = function.proto;
-    for (int pc : resume_pcs()) {
+    for (int pc : cfg::entries(function.proto)) {
         Block* target = function.at[pc];
         bool in_frame = std::all_of(
             target->preds.begin(), target->preds.end(),
@@ -457,26 +393,6 @@ bool computed(const Proto* proto, int pc) {
     default:
         return false;
     }
-}
-
-std::vector<int> successors(const Proto* proto, int pc) {
-    Instruction i = proto->code[pc];
-    switch (GET_OPCODE(i)) {
-    case OP_JMP:
-        return {pc + 1 + GETARG_sJ(i)};
-    case OP_RETURN:
-    case OP_RETURN0:
-    case OP_RETURN1:
-    case OP_TAILCALL:
-    case OP_EXTRAARG:
-        return {};
-    default:
-        break;
-    }
-    std::vector<int> next;
-    for (int move : moves(proto, pc))
-        next.push_back(pc + 1 + move);
-    return next;
 }
 
 bool in_frame(Value* value, int reg) {
