@@ -28,14 +28,14 @@ target_link_libraries(lua PRIVATE liblua)
 set_target_properties(lua PROPERTIES ENABLE_EXPORTS ON)
 
 add_executable(luamura
-    src/luamura/compiler/main.cpp src/luamura/compiler/emit.cpp
-    src/luamura/compiler/ssa.cpp)
+    src/luamura/lmc.cpp src/luamura/lmemit.cpp
+    src/luamura/lmssa.cpp)
 target_include_directories(luamura PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(luamura PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(luamura PRIVATE ${LLVM_LIBS} liblua)
 
 add_library(luamura_rt STATIC
-    src/luamura/runtime/main.c src/luamura/runtime/ops.c)
+    src/luamura/lmrt.c src/luamura/lmrtops.c)
 set_target_properties(luamura_rt PROPERTIES C_STANDARD 11)
 target_link_libraries(luamura_rt PUBLIC liblua)
 

@@ -1,7 +1,7 @@
 #ifndef SSA_H
 #define SSA_H
 
-#include "lua_headers.h"
+#include "lmlua.h"
 
 #include <bitset>
 #include <map>

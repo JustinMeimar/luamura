@@ -1,5 +1,5 @@
-#include "emit.h"
-#include "ssa.h"
+#include "lmemit.h"
+#include "lmssa.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>

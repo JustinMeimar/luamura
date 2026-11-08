@@ -2,9 +2,9 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "emit.h"
-#include "lua_headers.h"
-#include "ssa.h"
+#include "lmemit.h"
+#include "lmlua.h"
+#include "lmssa.h"
 
 #include <cstring>
 #include <iostream>

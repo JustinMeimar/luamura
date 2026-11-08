@@ -1,7 +1,7 @@
 #ifndef EMIT_H
 #define EMIT_H
 
-#include "lua_headers.h"
+#include "lmlua.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
