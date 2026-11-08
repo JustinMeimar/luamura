@@ -11,3 +11,7 @@ output.c
 compile_commands.json
 .cache/
 .direnv/
+
+src/lua
+src/luac
+src/luamura/luamura
