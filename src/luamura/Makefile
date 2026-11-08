@@ -30,7 +30,7 @@ LVM_BC= $(OBJ)/lua/lvm.bc
 LUA_T= $(BUILD)/lua
 LUAMURA_T= $(BUILD)/luamura
 LUAMURA_O= $(addprefix $(OBJ)/luamura/, \
-	lmc.o lmcfg.o lmssa.o lmbuilder.o lmcodegen.o)
+	lmc.o lmcfg.o lmssa.o lmcodegen.o)
 RT_O= $(BUILD)/lmrt.o
 
 TESTS= ../../tests
@@ -104,13 +104,9 @@ $(OBJ)/luamura/lmcfg.o: lmcfg.cpp lmcfg.h lmlua.h ../lauxlib.h \
 $(OBJ)/luamura/lmssa.o: lmssa.cpp lmssa.h lmlua.h ../lauxlib.h \
  ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h \
  ../lstate.h ../ltm.h ../lzio.h ../lmem.h lmcfg.h ../lopnames.h
-$(OBJ)/luamura/lmbuilder.o: lmbuilder.cpp lmbuilder.h lmlua.h \
- ../lauxlib.h ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h \
- ../lopcodes.h ../lstate.h ../ltm.h ../lzio.h ../lmem.h
 $(OBJ)/luamura/lmcodegen.o: lmcodegen.cpp lmcodegen.h lmlua.h \
  ../lauxlib.h ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h \
- ../lopcodes.h ../lstate.h ../ltm.h ../lzio.h ../lmem.h lmbuilder.h \
- lmcfg.h ../lopnames.h
+ ../lopcodes.h ../lstate.h ../ltm.h ../lzio.h ../lmem.h lmcfg.h ../lopnames.h
 $(RT_O): luamura.h ../lstate.h ../lua.h ../luaconf.h ../lobject.h \
  ../llimits.h ../ltm.h ../lzio.h ../lmem.h ../lauxlib.h ../ldebug.h \
  ../lfunc.h ../lualib.h

@@ -1,9 +1,9 @@
 #include "lmcodegen.h"
-#include "lmbuilder.h"
 #include "lmcfg.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/IRBuilder.h>
 
 #include <string>
 #include <vector>
@@ -38,7 +38,7 @@ private:
 
     llvm::Module& module;
     const Proto* proto;
-    Builder builder;
+    llvm::IRBuilder<> builder;
     llvm::Function* function = nullptr;
     llvm::Value* L = nullptr;
     llvm::Value* ci = nullptr;
@@ -50,7 +50,7 @@ private:
 };
 
 llvm::Function* FunctionCompiler::compile(const std::string& name) {
-    auto* ptr = builder.t_ptr;
+    auto* ptr = builder.getPtrTy();
     function = llvm::Function::Create(
         llvm::FunctionType::get(ptr, {ptr, ptr}, false),
         llvm::GlobalValue::InternalLinkage, name, module);
@@ -72,7 +72,7 @@ llvm::Function* FunctionCompiler::compile(const std::string& name) {
     pc_address = builder.CreateAlloca(ptr, nullptr, "pc");
     code = builder.CreateCall(runtime("lm_code", ptr, {ptr}), {ci});
     auto* saved = builder.CreateCall(
-        runtime("lm_resume", builder.t_i32, {ptr}), {ci});
+        runtime("lm_resume", builder.getInt32Ty(), {ptr}), {ci});
     std::vector<int> entries = cfg::entries(proto);
     auto* dispatch = builder.CreateSwitch(saved, interpret, entries.size());
     for (int pc : entries)
@@ -100,14 +100,14 @@ void FunctionCompiler::instruction(int pc) {
         builder.CreateUnreachable();
         return;
     }
-    auto* ptr = builder.t_ptr;
-    builder.CreateStore(
-        builder.CreateConstInBoundsGEP1_32(builder.t_i32, code, pc + 1),
-        pc_address);
-    auto* next =
-        builder.CreateCall(runtime(std::string("luaV_OP_") + opnames[op],
-                                   ptr, {ptr, ptr, ptr, builder.t_i32}),
-                           {L, ci, pc_address, builder.getInt32(i)});
+    auto* ptr = builder.getPtrTy();
+    builder.CreateStore(builder.CreateConstInBoundsGEP1_32(
+                            builder.getInt32Ty(), code, pc + 1),
+                        pc_address);
+    auto* next = builder.CreateCall(
+        runtime(std::string("luaV_OP_") + opnames[op], ptr,
+                {ptr, ptr, ptr, builder.getInt32Ty()}),
+        {L, ci, pc_address, builder.getInt32(i)});
     next->addFnAttr(llvm::Attribute::AlwaysInline);
 
     switch (op) {
@@ -142,7 +142,7 @@ void FunctionCompiler::instruction(int pc) {
         return;
     }
     auto* moved = builder.CreatePtrDiff(
-        builder.t_i32, builder.CreateLoad(ptr, pc_address), code);
+        builder.getInt32Ty(), builder.CreateLoad(ptr, pc_address), code);
     auto* to =
         builder.CreateSwitch(moved, blocks[targets[0]], targets.size() - 1);
     auto* type = llvm::cast<llvm::IntegerType>(moved->getType());
@@ -154,7 +154,7 @@ void FunctionCompiler::instruction(int pc) {
 // A Lua callee replaces this function in ci. Entering its native code
 // as a tail call keeps the C stack from growing.
 void FunctionCompiler::tail_call(llvm::Value* next) {
-    auto* ptr = builder.t_ptr;
+    auto* ptr = builder.getPtrTy();
     auto* callee = new_block("callee");
     auto* compiled = new_block("compiled");
     auto* done = new_block("done");
@@ -176,7 +176,9 @@ void FunctionCompiler::tail_call(llvm::Value* next) {
 llvm::Value* FunctionCompiler::hooked() {
     auto* mask = builder.CreateLoad(
         builder.getIntNTy(8 * sizeof(l_signalT)),
-        builder.offset(L, offsetof(lua_State, hookmask)), true);
+        builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), L,
+                                           offsetof(lua_State, hookmask)),
+        true);
     return builder.CreateIsNotNull(mask);
 }
 
