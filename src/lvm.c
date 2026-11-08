@@ -1214,6 +1214,17 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
   trap = L->hookmask;
  returning:  /* trap already set */
   cl = ci_func(ci);
+  if (cl->p->aot != NULL && !L->hookmask) {  /* compiled function? */
+    CallInfo *next = cl->p->aot(L, ci);
+    trap = L->hookmask;
+    if (next == NULL)
+      return;  /* end this frame */
+    if (next != ci) {
+      ci = next;
+      goto returning;  /* run the next call in this frame */
+    }
+    cl = ci_func(ci);  /* interpret 'ci' (a tail call may have replaced it) */
+  }
   k = cl->p->k;
   pc = ci->u.l.savedpc;
   if (l_unlikely(trap))
@@ -1973,6 +1984,30 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
     }
   }
+}
+
+/* }================================================================== */
+
+
+/*
+** {==================================================================
+** Exports for compiled implementations (see 'lua_AotFunction')
+** ===================================================================
+*/
+
+int luaV_forprep (lua_State *L, StkId ra) {
+  return forprep(L, ra);
+}
+
+
+int luaV_floatforloop (lua_State *L, StkId ra) {
+  return floatforloop(L, ra);
+}
+
+
+void luaV_pushclosure (lua_State *L, Proto *p, UpVal **encup, StkId base,
+                       StkId ra) {
+  pushclosure(L, p, encup, base, ra);
 }
 
 /* }================================================================== */
