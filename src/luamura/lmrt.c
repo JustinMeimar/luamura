@@ -11,8 +11,6 @@ static const char* progname = "luamura";
 
 const Instruction* lm_code(CallInfo* ci) { return ci_func(ci)->p->code; }
 
-const TValue* lm_constants(CallInfo* ci) { return ci_func(ci)->p->k; }
-
 int lm_resume(CallInfo* ci) {
     return cast_int(ci->u.l.savedpc - ci_func(ci)->p->code);
 }

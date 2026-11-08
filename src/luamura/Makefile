@@ -6,11 +6,13 @@ LLVM_CONFIG= llvm-config
 
 CC= gcc -std=gnu99
 CXX= g++
+CLANG= clang -std=gnu99
 OPT= -O2
 CFLAGS= $(OPT) -g -Wall -DLUAMURA $(SYSCFLAGS) $(MYCFLAGS)
 CXXFLAGS= $(OPT) -g -Wall -DLUAMURA -I.. \
-	$(shell $(LLVM_CONFIG) --cxxflags) $(MYCFLAGS)
-LIBS= $(shell $(LLVM_CONFIG) --ldflags --libs core support passes) \
+	--embed-dir=$(OBJ)/lua $(shell $(LLVM_CONFIG) --cxxflags) $(MYCFLAGS)
+LIBS= $(shell $(LLVM_CONFIG) --ldflags \
+	--libs core support passes bitreader linker) \
 	-lm -ldl
 
 # As Lua's Makefile sets them for Linux.
@@ -23,6 +25,8 @@ OBJ= $(BUILD)/obj
 LUA_O= $(patsubst ../%.c,$(OBJ)/lua/%.o, \
 	$(filter-out ../lua.c ../luac.c,$(wildcard ../*.c)))
 LUA_A= $(BUILD)/liblua.a
+# lvm.c as bitcode, which luamura embeds to inline its instructions
+LVM_BC= $(OBJ)/lua/lvm.bc
 LUA_T= $(BUILD)/lua
 LUAMURA_T= $(BUILD)/luamura
 LUAMURA_O= $(addprefix $(OBJ)/luamura/, \
@@ -47,6 +51,11 @@ $(OBJ)/lua $(OBJ)/luamura:
 
 $(OBJ)/lua/%.o: ../%.c $(wildcard ../*.h) | $(OBJ)/lua
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Always optimized, which inlines each instruction's body into its
+# function.
+$(LVM_BC): ../lvm.c $(wildcard ../*.h) | $(OBJ)/lua
+	$(CLANG) -O2 -DLUAMURA $(SYSCFLAGS) -emit-llvm -c -o $@ $<
 
 $(LUA_A): $(LUA_O)
 	$(AR) rcs $@ $^
@@ -88,7 +97,7 @@ clean:
 
 $(OBJ)/luamura/lmc.o: lmc.cpp lmcodegen.h lmlua.h ../lauxlib.h \
  ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h \
- ../lstate.h ../ltm.h ../lzio.h ../lmem.h lmssa.h
+ ../lstate.h ../ltm.h ../lzio.h ../lmem.h lmssa.h $(LVM_BC)
 $(OBJ)/luamura/lmcfg.o: lmcfg.cpp lmcfg.h lmlua.h ../lauxlib.h \
  ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h \
  ../lstate.h ../ltm.h ../lzio.h ../lmem.h

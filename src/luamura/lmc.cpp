@@ -1,4 +1,6 @@
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Linker/Linker.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -14,6 +16,35 @@ static int append(lua_State*, const void* data, size_t size, void* out) {
     static_cast<std::string*>(out)->append(static_cast<const char*>(data),
                                            size);
     return 0;
+}
+
+alignas(4) static const unsigned char lvm_bitcode[] = {
+#embed "lvm.bc"
+};
+
+// The compiled code calls lvm.c's function for each instruction. Linking
+// their bodies in lets LLVM inline them; liblua defines the rest.
+static bool link_lvm(llvm::Module& module) {
+    llvm::MemoryBufferRef buffer(
+        llvm::StringRef(reinterpret_cast<const char*>(lvm_bitcode),
+                        sizeof lvm_bitcode),
+        "lvm.bc");
+    auto lvm = llvm::parseBitcodeFile(buffer, module.getContext());
+    if (!lvm) {
+        llvm::logAllUnhandledErrors(lvm.takeError(), llvm::errs(),
+                                    "luamura: ");
+        return false;
+    }
+    for (llvm::Function& f : **lvm) {
+        // llc chooses the target, and inlining needs them to agree
+        f.removeFnAttr("target-cpu");
+        f.removeFnAttr("target-features");
+        f.removeFnAttr("tune-cpu");
+        if (!f.isDeclaration() && !f.hasLocalLinkage())
+            f.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
+    }
+    return !llvm::Linker::linkModules(module, std::move(*lvm),
+                                      llvm::Linker::LinkOnlyNeeded);
 }
 
 static void print_ssa(const Proto* p) {
@@ -63,7 +94,7 @@ int main(int argc, char* argv[]) {
     llvm::LLVMContext context;
     auto module = compile(context, main, chunk);
     lua_close(L);
-    if (llvm::verifyModule(*module, &llvm::errs()))
+    if (llvm::verifyModule(*module, &llvm::errs()) || !link_lvm(*module))
         return 1;
     optimize(*module);
 
