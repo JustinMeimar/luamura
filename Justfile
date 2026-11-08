@@ -38,10 +38,6 @@ interpret file *args: (build)
 ir file: (build)
     build/release/luamura {{file}} /dev/stdout
 
-# print the SSA form of a program's functions
-ssa file: (build)
-    build/release/luamura --ssa {{file}}
-
 # debug a compiled program in gdb
 debug file *args: (compile file "debug")
     gdb --args build/debug/out/{{file_stem(file)}} {{args}}

@@ -6,9 +6,7 @@
 
 #include "lmcodegen.h"
 #include "lmlua.h"
-#include "lmssa.h"
 
-#include <cstring>
 #include <iostream>
 #include <string>
 
@@ -47,12 +45,6 @@ static bool link_lvm(llvm::Module& module) {
                                       llvm::Linker::LinkOnlyNeeded);
 }
 
-static void print_ssa(const Proto* p) {
-    ssa::print(*ssa::lift(p), std::cout);
-    for (int i = 0; i < p->sizep; i++)
-        print_ssa(p->p[i]);
-}
-
 static void optimize(llvm::Module& module) {
     llvm::LoopAnalysisManager lam;
     llvm::FunctionAnalysisManager fam;
@@ -69,25 +61,17 @@ static void optimize(llvm::Module& module) {
 }
 
 int main(int argc, char* argv[]) {
-    bool ssa = argc == 3 && std::strcmp(argv[1], "--ssa") == 0;
     if (argc != 3) {
-        std::cerr << "usage: luamura <input.lua> <output.ll>\n"
-                     "       luamura --ssa <input.lua>\n";
+        std::cerr << "usage: luamura <input.lua> <output.ll>\n";
         return 1;
     }
-    const char* input = ssa ? argv[2] : argv[1];
     lua_State* L = luaL_newstate();
-    if (luaL_loadfile(L, input) != LUA_OK) {
+    if (luaL_loadfile(L, argv[1]) != LUA_OK) {
         std::cerr << "luamura: " << lua_tostring(L, -1) << "\n";
         lua_close(L);
         return 1;
     }
     const Proto* main = clLvalue(s2v(L->top.p - 1))->p;
-    if (ssa) {
-        print_ssa(main);
-        lua_close(L);
-        return 0;
-    }
     std::string chunk;
     lua_dump(L, append, &chunk, 0);
 
