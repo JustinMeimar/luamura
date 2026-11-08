@@ -27,7 +27,6 @@ private:
     void to_successors(int pc);
     void after_call(int pc, llvm::Value* next);
     void tail_call(llvm::Value* next);
-    llvm::Value* hooked();
     llvm::BasicBlock* new_block(const std::string& name) {
         return llvm::BasicBlock::Create(module.getContext(), name,
                                         function);
@@ -155,7 +154,8 @@ void FunctionCompiler::to_successors(int pc) {
 }
 
 // A Lua callee is left for luaV_execute to run. A C function returned
-// here, and may have set hooks, which only the interpreter runs.
+// here, and may have set a hook, such as with debug.sethook, which only
+// the interpreter runs.
 void FunctionCompiler::after_call(int pc, llvm::Value* next) {
     auto* returned = new_block("returned");
     auto* called = new_block("called");
@@ -163,7 +163,14 @@ void FunctionCompiler::after_call(int pc, llvm::Value* next) {
     builder.SetInsertPoint(called);
     builder.CreateRet(next);
     builder.SetInsertPoint(returned);
-    builder.CreateCondBr(hooked(), interpret, blocks[pc + 1]);
+    // volatile, as signal handlers set it
+    auto* hookmask = builder.CreateLoad(
+        builder.getIntNTy(8 * sizeof(l_signalT)),
+        builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), L,
+                                           offsetof(lua_State, hookmask)),
+        true);
+    builder.CreateCondBr(builder.CreateIsNotNull(hookmask), interpret,
+                         blocks[pc + 1]);
 }
 
 // A Lua callee replaces this function in ci. Entering its native code
@@ -188,21 +195,6 @@ void FunctionCompiler::tail_call(llvm::Value* next) {
     builder.CreateRet(call);
 }
 
-llvm::Value* FunctionCompiler::hooked() {
-    auto* mask = builder.CreateLoad(
-        builder.getIntNTy(8 * sizeof(l_signalT)),
-        builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), L,
-                                           offsetof(lua_State, hookmask)),
-        true);
-    return builder.CreateIsNotNull(mask);
-}
-
-void collect(const Proto* p, std::vector<const Proto*>& out) {
-    out.push_back(p);
-    for (int i = 0; i < p->sizep; i++)
-        collect(p->p[i], out);
-}
-
 } // namespace
 
 // The runtime attaches the functions to the chunk's Protos in preorder.
@@ -210,14 +202,15 @@ std::unique_ptr<llvm::Module> compile(llvm::LLVMContext& context,
                                       const Proto* main,
                                       const std::string& chunk) {
     auto module = std::make_unique<llvm::Module>("luamura", context);
-    std::vector<const Proto*> protos;
-    collect(main, protos);
-
     std::vector<llvm::Constant*> functions;
-    for (size_t i = 0; i < protos.size(); i++)
-        functions.push_back(
-            FunctionCompiler(*module, protos[i])
-                .compile("lm_function_" + std::to_string(i)));
+    auto compile_all = [&](auto& self, const Proto* p) -> void {
+        std::string name =
+            "lm_function_" + std::to_string(functions.size());
+        functions.push_back(FunctionCompiler(*module, p).compile(name));
+        for (int i = 0; i < p->sizep; i++)
+            self(self, p->p[i]);
+    };
+    compile_all(compile_all, main);
 
     auto define = [&](llvm::Constant* value, const char* name) {
         new llvm::GlobalVariable(*module, value->getType(), true,
