@@ -5,7 +5,8 @@
 */
 
 /*
-** Included where the instructions are expanded, in 'luaV_execute'.
+** Included where the instructions are expanded: in 'luaV_execute', and,
+** with LUAMURA defined, as one function per instruction (see lvm.c).
 ** 'vmgoto' and 'vmlabel' stand for the jumps among instructions.
 */
 

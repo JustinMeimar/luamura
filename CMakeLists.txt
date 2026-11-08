@@ -13,7 +13,7 @@ llvm_map_components_to_libnames(LLVM_LIBS core support passes)
 
 # Lua, statically: compiled code uses its internal symbols. liblua is
 # stock Lua; liblua_luamura defines LUAMURA, which lets functions have
-# compiled implementations.
+# compiled implementations and exports each instruction as a function.
 file(GLOB LUA_SOURCES CONFIGURE_DEPENDS src/*.c)
 list(REMOVE_ITEM LUA_SOURCES
     ${PROJECT_SOURCE_DIR}/src/lua.c ${PROJECT_SOURCE_DIR}/src/luac.c)
@@ -41,8 +41,7 @@ target_include_directories(luamura PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(luamura PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(luamura PRIVATE ${LLVM_LIBS} liblua_luamura)
 
-add_library(luamura_rt STATIC
-    src/luamura/lmrt.c src/luamura/lmrtops.c)
+add_library(luamura_rt STATIC src/luamura/lmrt.c)
 set_target_properties(luamura_rt PROPERTIES C_STANDARD 11)
 target_link_libraries(luamura_rt PUBLIC liblua_luamura)
 

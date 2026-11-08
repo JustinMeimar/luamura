@@ -1,12 +1,26 @@
 #include "luamura.h"
 
 #include "lauxlib.h"
+#include "ldebug.h"
 #include "lfunc.h"
 #include "lualib.h"
 
 #include <stdio.h>
 
 static const char* progname = "luamura";
+
+const Instruction* lm_code(CallInfo* ci) { return ci_func(ci)->p->code; }
+
+const TValue* lm_constants(CallInfo* ci) { return ci_func(ci)->p->k; }
+
+int lm_resume(CallInfo* ci) {
+    return cast_int(ci->u.l.savedpc - ci_func(ci)->p->code);
+}
+
+// The implementation to run ci with, or NULL to interpret it.
+lua_AotFunction lm_compiled(lua_State* L, CallInfo* ci) {
+    return L->hookmask ? NULL : ci_func(ci)->p->aot;
+}
 
 static int attach(Proto* p, int next) {
     if (next < 0 || next >= lm_nfunctions)

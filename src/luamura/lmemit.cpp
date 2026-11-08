@@ -52,13 +52,12 @@ public:
     llvm::Function* emit(const ssa::Function& f, size_t index);
 
 private:
-    llvm::FunctionCallee helper(OpCode op) {
-        auto* result =
-            is_call(op) ? static_cast<llvm::Type*>(t_ptr) : t_i32;
+    // lvm.c's instruction, as a function (see LUAMURA there)
+    llvm::FunctionCallee handler(OpCode op) {
         auto* type = llvm::FunctionType::get(
-            result, {t_ptr, t_ptr, t_ptr, t_i32}, false);
-        return module.getOrInsertFunction(std::string("lm_") + opnames[op],
-                                          type);
+            t_ptr, {t_ptr, t_ptr, t_ptr, t_i32}, false);
+        return module.getOrInsertFunction(
+            std::string("luaV_OP_") + opnames[op], type);
     }
 
     llvm::Value* tag(int t) { return builder.getInt8(t); }
@@ -86,6 +85,7 @@ private:
                 builder.CreateSelect(cond, a.tag, b.tag)};
     }
 
+    llvm::Value* hooked();
     llvm::Value* base();
     llvm::Value* slot(int reg);
     TV load(llvm::Value* address);
@@ -127,6 +127,8 @@ private:
     llvm::Value* ci = nullptr;
     llvm::Value* code = nullptr;
     llvm::Value* k = nullptr;
+    llvm::Value* pc_slot = nullptr;
+    llvm::BasicBlock* interpret = nullptr;
     llvm::Value* frame = nullptr;
     std::vector<llvm::BasicBlock*> blocks;
     std::vector<llvm::BasicBlock*> exits;
@@ -153,6 +155,15 @@ llvm::Value* Emitter::is_false(TV v) {
     auto* nil =
         builder.CreateICmpEQ(builder.CreateAnd(v.tag, 0x0F), tag(LUA_TNIL));
     return builder.CreateOr(has_tag(v, LUA_VFALSE), nil);
+}
+
+llvm::Value* Emitter::hooked() {
+    auto* mask = builder.CreateLoad(
+        builder.getIntNTy(8 * sizeof(l_signalT)),
+        builder.CreateConstInBoundsGEP1_64(
+            t_i8, L, offsetof(lua_State, hookmask)),
+        true);
+    return builder.CreateIsNotNull(mask);
 }
 
 // The frame moves when the stack grows, so its base is computed again
@@ -414,16 +425,21 @@ void Emitter::emit_observed(const ssa::Block& b, int n) {
         if (!ssa::in_frame(v, reg))
             store(get(v), slot(reg));
 
-    auto* next = builder.CreateConstInBoundsGEP1_32(t_i32, code, pc + 1);
-    auto* result =
-        builder.CreateCall(helper(op), {L, ci, next, builder.getInt32(i)});
+    builder.CreateStore(
+        builder.CreateConstInBoundsGEP1_32(t_i32, code, pc + 1), pc_slot);
+    auto* result = builder.CreateCall(
+        handler(op), {L, ci, pc_slot, builder.getInt32(i)});
     frame = nullptr;
     emit_loads(b, n);
     if (op == OP_CALL) {
-        auto* run = llvm::BasicBlock::Create(context, "run", function);
-        builder.CreateCondBr(builder.CreateIsNull(result), at(pc + 1), run);
+        // a C function returned, and may have set hooks
+        auto* returned = fresh("returned");
+        auto* run = fresh("run");
+        builder.CreateCondBr(builder.CreateIsNull(result), returned, run);
         builder.SetInsertPoint(run);
         builder.CreateRet(result);
+        builder.SetInsertPoint(returned);
+        builder.CreateCondBr(hooked(), interpret, at(pc + 1));
         return;
     }
     if (op == OP_TAILCALL) {
@@ -460,10 +476,15 @@ void Emitter::emit_observed(const ssa::Block& b, int n) {
         builder.CreateBr(at(targets[0]));
         return;
     }
+    auto* moved = builder.CreatePtrDiff(
+        t_i32, builder.CreateLoad(t_ptr, pc_slot), code);
     auto* sw =
-        builder.CreateSwitch(result, at(targets[0]), targets.size() - 1);
+        builder.CreateSwitch(moved, at(targets[0]), targets.size() - 1);
     for (size_t n = 1; n < targets.size(); n++)
-        sw->addCase(builder.getInt32(targets[n] - pc - 1), at(targets[n]));
+        sw->addCase(llvm::ConstantInt::get(
+                        llvm::cast<llvm::IntegerType>(moved->getType()),
+                        targets[n]),
+                    at(targets[n]));
 }
 
 void Emitter::emit_loads(const ssa::Block& b, int position) {
@@ -533,8 +554,7 @@ llvm::Function* Emitter::emit(const ssa::Function& lifted, size_t index) {
     std::reverse(order.begin(), order.end());
 
     auto* entry = llvm::BasicBlock::Create(context, "entry", function);
-    auto* interpret =
-        llvm::BasicBlock::Create(context, "interpret", function);
+    interpret = llvm::BasicBlock::Create(context, "interpret", function);
     blocks.assign(f->blocks.size(), nullptr);
     exits.assign(f->blocks.size(), nullptr);
     for (const ssa::Block* b : order)
@@ -546,6 +566,7 @@ llvm::Function* Emitter::emit(const ssa::Function& lifted, size_t index) {
     builder.CreateRet(ci);
 
     builder.SetInsertPoint(entry);
+    pc_slot = builder.CreateAlloca(t_ptr);
     code = builder.CreateCall(
         module.getOrInsertFunction("lm_code", t_ptr, t_ptr), {ci});
     k = builder.CreateCall(

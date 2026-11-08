@@ -125,10 +125,6 @@ LUAI_FUNC lu_byte luaV_finishget (lua_State *L, const TValue *t, TValue *key,
 LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
                                              TValue *val, int aux);
 LUAI_FUNC void luaV_finishOp (lua_State *L);
-LUAI_FUNC int luaV_forprep (lua_State *L, StkId ra);
-LUAI_FUNC int luaV_floatforloop (lua_State *L, StkId ra);
-LUAI_FUNC void luaV_pushclosure (lua_State *L, Proto *p, UpVal **encup,
-                                 StkId base, StkId ra);
 LUAI_FUNC void luaV_execute (lua_State *L, CallInfo *ci);
 LUAI_FUNC void luaV_concat (lua_State *L, int total);
 LUAI_FUNC lua_Integer luaV_idiv (lua_State *L, lua_Integer x, lua_Integer y);

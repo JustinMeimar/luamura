@@ -1272,25 +1272,49 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
 /* }================================================================== */
 
 
+#if defined(LUAMURA)
 /*
 ** {==================================================================
-** Exports for compiled implementations (see 'lua_AotFunction')
+** Instructions as functions, for compiled implementations (see
+** 'lua_AotFunction'): 'luaV_OP_MOVE' and so on. Each runs instruction
+** 'i' of 'ci', with '*pc' pointing past it, and leaves in '*pc' where
+** the function continues. Calls and returns give the next call to run,
+** as a 'lua_AotFunction' does; other instructions give NULL.
 ** ===================================================================
 */
 
-int luaV_forprep (lua_State *L, StkId ra) {
-  return forprep(L, ra);
-}
+#undef vmcase
+#undef vmbreak
+#undef vmgoto_startfunc
+#undef vmgoto_ret
+#undef vmgoto_l_tforcall
+#undef vmgoto_l_tforloop
+#undef vmlabel
 
+#define vmcase(op) \
+  static CallInfo *op##_body (lua_State *L, CallInfo *ci, LClosure *cl, \
+                             TValue *k, StkId base, const Instruction *pc, \
+                             int trap, Instruction i, \
+                             const Instruction **next); \
+  CallInfo *luaV_##op (lua_State *L, CallInfo *ci, const Instruction **pc, \
+                      Instruction i) { \
+    LClosure *cl = ci_func(ci); \
+    return op##_body(L, ci, cl, cl->p->k, ci->func.p + 1, *pc, \
+                    ci->u.l.trap, i, pc); \
+  } \
+  static CallInfo *op##_body (lua_State *L, CallInfo *ci, LClosure *cl, \
+                             TValue *k, StkId base, const Instruction *pc, \
+                             int trap, Instruction i, \
+                             const Instruction **next)
+#define vmbreak		return (*next = pc, NULL)
+#define vmgoto_startfunc	return ci
+#define vmgoto_ret  \
+	return (ci->callstatus & CIST_FRESH) ? NULL : ci->previous
+#define vmgoto_l_tforcall	vmbreak
+#define vmgoto_l_tforloop	vmbreak
+#define vmlabel(l)	/* empty */
 
-int luaV_floatforloop (lua_State *L, StkId ra) {
-  return floatforloop(L, ra);
-}
-
-
-void luaV_pushclosure (lua_State *L, Proto *p, UpVal **encup, StkId base,
-                       StkId ra) {
-  pushclosure(L, p, encup, base, ra);
-}
+#include "lvmops.h"
 
 /* }================================================================== */
+#endif
