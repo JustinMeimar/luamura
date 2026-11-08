@@ -8,9 +8,9 @@ make := "make --no-print-directory -C src/luamura -j" + num_cpus()
 default:
     @just --list
 
-# build luamura, its runtime and Lua
+# build luamura, its runtime and Lua, recording compile_commands.json
 build profile="release":
-    {{make}} BUILD=../../build/{{profile}} OPT={{ if profile == "debug" { "-O0" } else { "-O2" } }}
+    bear --append --output compile_commands.json -- {{make}} BUILD=../../build/{{profile}} OPT={{ if profile == "debug" { "-O0" } else { "-O2" } }}
 
 # run tests: all, internal, lua-test, or one test such as internal/010_base
 test target="all" profile="release": (build profile)
