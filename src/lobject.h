@@ -599,11 +599,9 @@ typedef struct AbsLineInfo {
 
 #if defined(LUAMURA)
 /*
-** A compiled implementation of a function. It runs the function of 'ci'
-** from 'ci->u.l.savedpc', and returns the next Lua call to run: a new
-** call it made, or its caller after it returned. It returns NULL after
-** returning from a fresh call, and 'ci' itself to have the interpreter
-** continue the function from its saved pc.
+** Native code for a function, compiled by luamura. It returns the next
+** call to run instead of making it, so that calls do not grow the C
+** stack.
 */
 struct CallInfo;
 typedef struct CallInfo *(*lua_AotFunction) (lua_State *L,
@@ -638,7 +636,7 @@ typedef struct Proto {
   TString  *source;  /* used for debug information */
   GCObject *gclist;
 #if defined(LUAMURA)
-  lua_AotFunction aot;  /* compiled implementation, or NULL */
+  lua_AotFunction aot;
 #endif
 } Proto;
 

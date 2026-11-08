@@ -1200,7 +1200,6 @@ void luaV_finishOp (lua_State *L) {
 #define vmcase(l)	case l:
 #define vmbreak		break
 
-/* jumps among instructions (see lvmops.h) */
 #define vmgoto(l)	vmgoto_##l
 #define vmgoto_startfunc	goto startfunc
 #define vmgoto_ret	goto ret
@@ -1223,16 +1222,17 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
  returning:  /* trap already set */
   cl = ci_func(ci);
 #if defined(LUAMURA)
-  if (cl->p->aot != NULL && !L->hookmask) {  /* compiled function? */
+  /* only the interpreter runs hooks */
+  if (cl->p->aot != NULL && !L->hookmask) {
     CallInfo *next = cl->p->aot(L, ci);
     trap = L->hookmask;
     if (next == NULL)
       return;  /* end this frame */
     if (next != ci) {
       ci = next;
-      goto returning;  /* run the next call in this frame */
+      goto returning;
     }
-    cl = ci_func(ci);  /* interpret 'ci' (a tail call may have replaced it) */
+    cl = ci_func(ci);  /* a tail call may have changed the function */
   }
 #endif
   k = cl->p->k;
@@ -1275,11 +1275,8 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
 #if defined(LUAMURA)
 /*
 ** {==================================================================
-** Instructions as functions, for compiled implementations (see
-** 'lua_AotFunction'): 'luaV_OP_MOVE' and so on. Each runs instruction
-** 'i' of 'ci', with '*pc' pointing past it, and leaves in '*pc' where
-** the function continues. Calls and returns give the next call to run,
-** as a 'lua_AotFunction' does; other instructions give NULL.
+** Each instruction as a function, so that compiled code can run the
+** instructions it does not compile itself.
 ** ===================================================================
 */
 
@@ -1312,7 +1309,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
 	return (ci->callstatus & CIST_FRESH) ? NULL : ci->previous
 #define vmgoto_l_tforcall	vmbreak
 #define vmgoto_l_tforloop	vmbreak
-#define vmlabel(l)	/* empty */
+#define vmlabel(l)
 
 #include "lvmops.h"
 

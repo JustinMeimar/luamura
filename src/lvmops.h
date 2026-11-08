@@ -1,13 +1,8 @@
 /*
 ** $Id: lvmops.h $
-** Lua virtual machine instructions, the cases of 'luaV_execute'
+** Lua virtual machine instructions, shared by the interpreter and by
+** compiled code, so that both run them the same way
 ** See Copyright Notice in lua.h
-*/
-
-/*
-** Included where the instructions are expanded: in 'luaV_execute', and,
-** with LUAMURA defined, as one function per instruction (see lvm.c).
-** 'vmgoto' and 'vmlabel' stand for the jumps among instructions.
 */
 
       vmcase(OP_MOVE) {
@@ -643,7 +638,7 @@
         halfProtect(luaF_newtbcupval(L, ra + 2));
         pc += GETARG_Bx(i);  /* go to end of the loop */
         lua_assert(GET_OPCODE(*pc) == OP_TFORCALL && ra == RA(*pc));
-        vmgoto(l_tforcall);  /* run the next instruction */
+        vmgoto(l_tforcall);
       }
       vmcase(OP_TFORCALL) {
        vmlabel(l_tforcall) {
@@ -661,7 +656,7 @@
         ProtectNT(luaD_call(L, ra + 3, GETARG_C(i)));  /* do the call */
         updatestack(ci);  /* stack may have changed */
         lua_assert(GET_OPCODE(*pc) == OP_TFORLOOP && ra == RA(*pc));
-        vmgoto(l_tforloop);  /* run the next instruction */
+        vmgoto(l_tforloop);
       }}
       vmcase(OP_TFORLOOP) {
        vmlabel(l_tforloop) {
