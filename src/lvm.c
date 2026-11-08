@@ -1222,6 +1222,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
   trap = L->hookmask;
  returning:  /* trap already set */
   cl = ci_func(ci);
+#if defined(LUAMURA)
   if (cl->p->aot != NULL && !L->hookmask) {  /* compiled function? */
     CallInfo *next = cl->p->aot(L, ci);
     trap = L->hookmask;
@@ -1233,6 +1234,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
     }
     cl = ci_func(ci);  /* interpret 'ci' (a tail call may have replaced it) */
   }
+#endif
   k = cl->p->k;
   pc = ci->u.l.savedpc;
   if (l_unlikely(trap))

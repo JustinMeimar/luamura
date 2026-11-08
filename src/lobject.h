@@ -597,6 +597,7 @@ typedef struct AbsLineInfo {
 */
 #define needvatab(p)	((p)->flag |= PF_VATAB)
 
+#if defined(LUAMURA)
 /*
 ** A compiled implementation of a function. It runs the function of 'ci'
 ** from 'ci->u.l.savedpc', and returns the next Lua call to run: a new
@@ -607,6 +608,7 @@ typedef struct AbsLineInfo {
 struct CallInfo;
 typedef struct CallInfo *(*lua_AotFunction) (lua_State *L,
                                              struct CallInfo *ci);
+#endif
 
 
 /*
@@ -635,7 +637,9 @@ typedef struct Proto {
   LocVar *locvars;  /* information about local variables (debug information) */
   TString  *source;  /* used for debug information */
   GCObject *gclist;
+#if defined(LUAMURA)
   lua_AotFunction aot;  /* compiled implementation, or NULL */
+#endif
 } Proto;
 
 /* }================================================================== */

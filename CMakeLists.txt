@@ -11,18 +11,25 @@ endif()
 find_package(LLVM REQUIRED CONFIG)
 llvm_map_components_to_libnames(LLVM_LIBS core support passes)
 
-# Lua, statically: compiled code uses its internal symbols.
+# Lua, statically: compiled code uses its internal symbols. liblua is
+# stock Lua; liblua_luamura defines LUAMURA, which lets functions have
+# compiled implementations.
 file(GLOB LUA_SOURCES CONFIGURE_DEPENDS src/*.c)
 list(REMOVE_ITEM LUA_SOURCES
     ${PROJECT_SOURCE_DIR}/src/lua.c ${PROJECT_SOURCE_DIR}/src/luac.c)
-add_library(liblua STATIC ${LUA_SOURCES})
-set_target_properties(liblua PROPERTIES OUTPUT_NAME lua C_STANDARD 99)
-target_include_directories(liblua PUBLIC src)
-target_compile_definitions(liblua PUBLIC
-    $<$<PLATFORM_ID:Linux>:LUA_USE_LINUX>)
-target_link_libraries(liblua PUBLIC m ${CMAKE_DL_LIBS})
+foreach(lib liblua liblua_luamura)
+    add_library(${lib} STATIC ${LUA_SOURCES})
+    set_target_properties(${lib} PROPERTIES C_STANDARD 99)
+    target_include_directories(${lib} PUBLIC src)
+    target_compile_definitions(${lib} PUBLIC
+        $<$<PLATFORM_ID:Linux>:LUA_USE_LINUX>)
+    target_link_libraries(${lib} PUBLIC m ${CMAKE_DL_LIBS})
+endforeach()
+set_target_properties(liblua PROPERTIES OUTPUT_NAME lua)
+set_target_properties(liblua_luamura PROPERTIES OUTPUT_NAME lua_luamura)
+target_compile_definitions(liblua_luamura PUBLIC LUAMURA)
 
-# The stock interpreter, built from the same tree: the tests' reference.
+# The stock interpreter: the tests' reference.
 add_executable(lua src/lua.c)
 target_link_libraries(lua PRIVATE liblua)
 set_target_properties(lua PROPERTIES ENABLE_EXPORTS ON)
@@ -32,12 +39,12 @@ add_executable(luamura
     src/luamura/lmssa.cpp)
 target_include_directories(luamura PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(luamura PRIVATE ${LLVM_DEFINITIONS})
-target_link_libraries(luamura PRIVATE ${LLVM_LIBS} liblua)
+target_link_libraries(luamura PRIVATE ${LLVM_LIBS} liblua_luamura)
 
 add_library(luamura_rt STATIC
     src/luamura/lmrt.c src/luamura/lmrtops.c)
 set_target_properties(luamura_rt PROPERTIES C_STANDARD 11)
-target_link_libraries(luamura_rt PUBLIC liblua)
+target_link_libraries(luamura_rt PUBLIC liblua_luamura)
 
 enable_testing()
 
@@ -57,7 +64,7 @@ foreach(suite internal lua-test)
         add_test(NAME ${suite}_${name}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/run_case.sh
                 $<TARGET_FILE:luamura> $<TARGET_FILE:lua> ${test}
-                $<TARGET_FILE:luamura_rt> $<TARGET_FILE:liblua>
+                $<TARGET_FILE:luamura_rt> $<TARGET_FILE:liblua_luamura>
                 -Wl,-E ${dl_flags})
         set_tests_properties(${suite}_${name} PROPERTIES
             LABELS "e2e;${suite}"
