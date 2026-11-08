@@ -24,7 +24,7 @@ public:
 private:
     void instruction(int pc);
     llvm::Value* run(int pc);
-    void branch(int pc);
+    void to_successors(int pc);
     void after_call(int pc, llvm::Value* next);
     void tail_call(llvm::Value* next);
     llvm::Value* hooked();
@@ -115,7 +115,7 @@ void FunctionCompiler::instruction(int pc) {
         builder.CreateRet(next);
         return;
     default:
-        return branch(pc);
+        return to_successors(pc);
     }
 }
 
@@ -139,7 +139,7 @@ llvm::Value* FunctionCompiler::run(int pc) {
 
 // The instruction left in pc where to continue. Where it has a single
 // successor, pc is not needed.
-void FunctionCompiler::branch(int pc) {
+void FunctionCompiler::to_successors(int pc) {
     std::vector<int> targets = cfg::successors(proto, pc);
     if (targets.size() == 1) {
         if (targets[0] != pc + 1)
