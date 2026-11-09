@@ -20,7 +20,8 @@ BaselineCompiler::BaselineCompiler(llvm::Module& module,
       aot_function_ty(
           llvm::FunctionType::get(ptr_ty, {ptr_ty, ptr_ty}, false)),
       op_handler_ty(llvm::FunctionType::get(
-          ptr_ty, {ptr_ty, ptr_ty, ptr_ty, instruction_ty}, false)),
+          ptr_ty, {ptr_ty, ptr_ty, ptr_ty, instruction_ty, instruction_ty},
+          false)),
       lm_code(module.getOrInsertFunction("lm_code", ptr_ty, ptr_ty)),
       lm_resume(module.getOrInsertFunction("lm_resume", i32_ty, ptr_ty)),
       lm_compiled(module.getOrInsertFunction("lm_compiled", ptr_ty, ptr_ty,
@@ -39,6 +40,8 @@ llvm::Value* BlockCompiler::compile(const CFG::Block& block) {
 
 llvm::Value* BlockCompiler::projectOpHandler(PC pc) {
     Instruction i = proto.code[pc];
+    // the jump after i, if i is a test
+    Instruction ni = pc + 1 < proto.sizecode ? proto.code[pc + 1] : 0;
     // the interpreter's pc after fetching i
     builder.CreateStore(builder.CreateConstInBoundsGEP1_32(
                             instruction_ty, frame.code, pc + 1),
@@ -47,7 +50,8 @@ llvm::Value* BlockCompiler::projectOpHandler(PC pc) {
         module.getOrInsertFunction(std::string("luaV_OP_") +
                                        opnames[GET_OPCODE(i)],
                                    op_handler_ty),
-        {frame.L, frame.ci, frame.pc, builder.getInt32(i)});
+        {frame.L, frame.ci, frame.pc, builder.getInt32(i),
+         builder.getInt32(ni)});
     call->addFnAttr(llvm::Attribute::AlwaysInline);
     return call;
 }

@@ -1296,20 +1296,27 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
 #define lm_trap(ci)	(*cast(l_signalT *, &(ci)->u.l.trap))
 #define updatetrap(ci)	(trap = lm_trap(ci))
 
+/*
+** Compiled code passes the instruction after 'i' as a constant, so the
+** jump after a test folds into a branch.
+*/
+#undef donextjump
+#define donextjump(ci)	dojump(ci, ni, 1)
+
 #define vmcase(op) \
   static CallInfo *op##_body (lua_State *L, CallInfo *ci, LClosure *cl, \
                              TValue *k, StkId base, const Instruction *pc, \
-                             int trap, Instruction i, \
+                             int trap, Instruction i, Instruction ni, \
                              const Instruction **next); \
   CallInfo *luaV_##op (lua_State *L, CallInfo *ci, const Instruction **pc, \
-                      Instruction i) { \
+                      Instruction i, Instruction ni) { \
     LClosure *cl = ci_func(ci); \
     return op##_body(L, ci, cl, cl->p->k, ci->func.p + 1, *pc, \
-                    lm_trap(ci), i, pc); \
+                    lm_trap(ci), i, ni, pc); \
   } \
   static CallInfo *op##_body (lua_State *L, CallInfo *ci, LClosure *cl, \
                              TValue *k, StkId base, const Instruction *pc, \
-                             int trap, Instruction i, \
+                             int trap, Instruction i, Instruction ni, \
                              const Instruction **next)
 #define vmbreak		return (*next = pc, NULL)
 #define vmgoto_startfunc	return ci
