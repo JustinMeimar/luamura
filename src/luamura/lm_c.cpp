@@ -24,7 +24,7 @@ alignas(4) static const unsigned char lvm_bitcode[] = {
 
 // The compiled code calls lvm.c's function for each instruction. Linking
 // their bodies in lets LLVM inline them; liblua defines the rest.
-static bool link_lvm(llvm::Module& module) {
+static bool linkLVM(llvm::Module& module) {
     llvm::MemoryBufferRef buffer(
         llvm::StringRef(reinterpret_cast<const char*>(lvm_bitcode),
                         sizeof lvm_bitcode),
@@ -80,10 +80,10 @@ int main(int argc, char* argv[]) {
     lua_dump(L, luamura::append, &chunk, 0);
 
     llvm::LLVMContext context;
-    auto module = luamura::compile_module(context, *main, chunk);
+    auto module = luamura::compileModule(context, *main, chunk);
     lua_close(L);
     if (llvm::verifyModule(*module, &llvm::errs()) ||
-        !luamura::link_lvm(*module))
+        !luamura::linkLVM(*module))
         return 1;
     luamura::optimize(*module);
 

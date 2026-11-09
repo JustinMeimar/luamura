@@ -17,9 +17,9 @@ namespace luamura {
 // The baseline compiler. Each function of the chunk becomes a native
 // function that runs its instructions on the Lua stack, with lvm.c's
 // function for each instruction.
-std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
-                                             const Proto& main,
-                                             const std::string& chunk);
+std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
+                                            const Proto& main,
+                                            const std::string& chunk);
 
 // What luaV_execute keeps while running a function.
 struct Frame {
@@ -32,9 +32,9 @@ struct Frame {
 
 // What every compiler shares: the module, the builder inserting into
 // it, and the LLVM types compiled code uses.
-class Compiler {
+class BaselineCompiler {
 public:
-    Compiler(llvm::Module& module, llvm::IRBuilder<>& builder);
+    BaselineCompiler(llvm::Module& module, llvm::IRBuilder<>& builder);
 
 protected:
     llvm::Module& module;
@@ -61,9 +61,9 @@ protected:
 // with the instruction as a constant, and LLVM inlines the call. What
 // remains is the interpreter's work for that instruction alone, without
 // fetching, decoding or dispatch.
-class BlockCompiler : Compiler {
+class BlockCompiler : BaselineCompiler {
 public:
-    BlockCompiler(const Compiler& compiler, const Proto& proto,
+    BlockCompiler(const BaselineCompiler& compiler, const Proto& proto,
                   const Frame& frame);
 
     // Returns what the block's last instruction returned: the next call
@@ -71,7 +71,7 @@ public:
     llvm::Value* compile(const CFG::Block& block);
 
 private:
-    llvm::Value* project_op_handler(PC pc);
+    llvm::Value* projectOpHandler(PC pc);
 
     const Proto& proto;
     Frame frame;
@@ -80,20 +80,20 @@ private:
 // Compiles a Lua function to a native function whose control flow
 // mirrors its CFG: an LLVM block for each of the CFG's blocks, ending
 // where the interpreter would continue.
-class FunctionCompiler : Compiler {
+class FunctionCompiler : BaselineCompiler {
 public:
-    FunctionCompiler(const Compiler& compiler, const Proto& proto);
+    FunctionCompiler(const BaselineCompiler& compiler, const Proto& proto);
 
     llvm::Function* compile(const llvm::Twine& name);
 
 private:
     void enter();
     void terminate(const CFG::Block& block, llvm::Value* next);
-    void to_successors(const CFG::Block& block);
-    void after_call(llvm::Value* next, llvm::BasicBlock* successor);
-    void tail_call(llvm::Value* next);
-    void return_if(llvm::Value* condition, llvm::Value* value);
-    llvm::BasicBlock* create_block(const llvm::Twine& name = "");
+    void toSuccessors(const CFG::Block& block);
+    void afterCall(llvm::Value* next, llvm::BasicBlock* successor);
+    void tailCall(llvm::Value* next);
+    void returnIf(llvm::Value* condition, llvm::Value* value);
+    llvm::BasicBlock* createBlock(const llvm::Twine& name = "");
 
     const Proto& proto;
     CFG cfg;
@@ -106,14 +106,14 @@ private:
 };
 
 // Compiles a chunk's functions, and defines what the runtime loads.
-class ModuleCompiler : Compiler {
+class ModuleCompiler : BaselineCompiler {
 public:
-    using Compiler::Compiler;
+    using BaselineCompiler::BaselineCompiler;
 
     void compile(const Proto& main, const std::string& chunk);
 
 private:
-    void compile_function(const Proto& proto);
+    void compileFunction(const Proto& proto);
     void define(const char* name, llvm::Constant* value);
 
     std::vector<llvm::Constant*> functions;

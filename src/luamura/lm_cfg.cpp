@@ -5,18 +5,18 @@
 namespace luamura {
 
 CFG::CFG(const Proto& proto) : proto(proto) {
-    find_leaders();
-    add_blocks(reachable());
+    findLeaders();
+    addBlocks(reachable());
 }
 
-bool CFG::is_call(PC pc) const {
+bool CFG::isCall(PC pc) const {
     OpCode op = GET_OPCODE(proto.code[pc]);
     return op == OP_CALL || op == OP_TFORCALL;
 }
 
 // The pcs the instruction at 'pc' may continue at, the most common
 // first.
-std::vector<PC> CFG::successor_pcs(PC pc) const {
+std::vector<PC> CFG::successorPCs(PC pc) const {
     Instruction i = proto.code[pc];
     OpCode op = GET_OPCODE(i);
     PC next = pc + 1;
@@ -62,14 +62,14 @@ std::vector<PC> CFG::successor_pcs(PC pc) const {
 
 // A block ends where control may go anywhere but the next instruction,
 // and after calls, where Lua resumes the function.
-void CFG::find_leaders() {
+void CFG::findLeaders() {
     PC n = proto.sizecode;
     leader.assign(n, false);
     leader[0] = true;
     for (PC pc = 0; pc < n; pc++) {
-        std::vector<PC> next = successor_pcs(pc);
+        std::vector<PC> next = successorPCs(pc);
         bool falls = next.size() == 1 && next[0] == pc + 1;
-        if (falls && !is_call(pc))
+        if (falls && !isCall(pc))
             continue;
         for (PC s : next)
             leader[s] = true;
@@ -78,7 +78,7 @@ void CFG::find_leaders() {
     }
 }
 
-PC CFG::block_end(PC start) const {
+PC CFG::blockEnd(PC start) const {
     return static_cast<PC>(
         std::find(leader.begin() + start + 1, leader.end(), true) -
         leader.begin());
@@ -94,13 +94,13 @@ std::vector<bool> CFG::reachable() const {
         if (reached[start])
             continue;
         reached[start] = true;
-        for (PC s : successor_pcs(block_end(start) - 1))
+        for (PC s : successorPCs(blockEnd(start) - 1))
             work.push_back(s);
     }
     return reached;
 }
 
-void CFG::add_blocks(const std::vector<bool>& reached) {
+void CFG::addBlocks(const std::vector<bool>& reached) {
     PC n = proto.sizecode;
     // the block starting at each reached pc
     std::vector<BlockIndex> index(n);
@@ -108,13 +108,13 @@ void CFG::add_blocks(const std::vector<bool>& reached) {
         if (!reached[pc])
             continue;
         index[pc] = static_cast<BlockIndex>(blocks.size());
-        blocks.push_back({pc, block_end(pc), {}});
+        blocks.push_back({pc, blockEnd(pc), {}});
     }
     entries.push_back(0);
     for (Block& b : blocks) {
-        for (PC s : successor_pcs(b.last()))
+        for (PC s : successorPCs(b.last()))
             b.successors.push_back(index[s]);
-        if (is_call(b.last()))
+        if (isCall(b.last()))
             entries.push_back(b.successors.front());
     }
 }

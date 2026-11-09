@@ -34,12 +34,12 @@ public:
     std::vector<BlockIndex> entries;
 
 private:
-    bool is_call(PC pc) const;
-    std::vector<PC> successor_pcs(PC pc) const;
-    void find_leaders();
-    PC block_end(PC start) const;
+    bool isCall(PC pc) const;
+    std::vector<PC> successorPCs(PC pc) const;
+    void findLeaders();
+    PC blockEnd(PC start) const;
     std::vector<bool> reachable() const;
-    void add_blocks(const std::vector<bool>& reached);
+    void addBlocks(const std::vector<bool>& reached);
 
     const Proto& proto;
     // whether a block starts at each pc
