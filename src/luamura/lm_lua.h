@@ -1,5 +1,5 @@
-#ifndef LUA_HEADERS_H
-#define LUA_HEADERS_H
+#ifndef LM_LUA_H
+#define LM_LUA_H
 
 // Lua defines a function-like macro 'cast', which LLVM declares as a
 // function. Declaring LLVM's first leaves only its calls, cast<T>(x),
@@ -15,4 +15,4 @@ extern "C" {
 #include "lua.h"
 }
 
-#endif // LUA_HEADERS_H
+#endif // LM_LUA_H
