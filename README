@@ -9,13 +9,75 @@
         further information about Lua, see doc/readme.html.
 
 |=------------------------------------------------------------------=|
-
+ 
 
 --[ Table of Contents
 
-0 - Introduction
+0 - Motivation
+0 - Overview
+1 - Benchmarks
 
---[ Introduction 
+--[ Motivation
 
+Luamura is an AOT Baseline compiler for lua. The primary goal is to
+eliminate the interpreters dispatch overhead. Luamura achieves this by
+applying the first Futamura projection, deriving a compiled binary by
+specializing the interpreter to a fixed bytecode.
+
+When seeking performance over an interpreter, why not use a JIT? There are
+several deployment settings where JIT compilation may not be appropriate or
+even possible. Sandboxed WASM execution, for instance, can not use dynamic
+executable memory. Interpreters/VMs are therefore the only option since they
+have static executable memory. JITs may also be more memory intensive,
+require an expensive warmup phase, and have a propensity for bugs.
+
+--[ Overview
+ 
+The set of AOT compiled function are emited into a binary which links
+liblua. These functions are marked with an AOT flag in the Prototype. Native
+functions can, and often do, bail out or dispatch to VM routines for garbage
+collection, debug handling, co-routine scheduling, etc. This is what allows
+Luamura to be a compliant implementation with relatively little effort. It
+is also limits the Baseline performance. All dispatches into the VM are
+opaque, and make analysis imprecise. Moreover, any VM call can mutate the
+stack, PC, etc, which forces native-compiled code to be defensive around
+each call.
+ 
+To natively compile Lua, each function is a module is lexed, parsed and
+lowered into bytecode. A control-flow-graph (CFG) is constructed from the
+instructions in each function. The Baseline compiler receives the CFG and
+iterates over its blocks. For each bytecode instruction within a block, the
+IR builder emits a call to the respective op-handler function, marked with
+the always-inline attribute. A straight-line sequence of Lua bytecode then
+compiles down into each op-handler stitched together, with no dispatch
+overhead.
+ 
+In order to make each op-handler visible, the interpreter is modified to
+also expose each op-handler as a function. The interpreter retains its
+computed-goto (threaded) dispatch. Luamura achieves a geometric mean speedup
+of 1.13x on Are We Fast Yet? (AWFY) in the run below.
+
+
+1 - AWFY Benchmarks
+
+
+    Benchmark          Lua (s)     luamura (s)     Speedup
+    ----------------  --------    -----------    --------
+    Bounce              0.9003         0.7543       1.19x
+    CD                  2.0736         1.9892       1.04x
+    DeltaBlue           0.6781         0.6914       0.98x
+    Havlak              5.5472         5.4378       1.02x
+    Json                0.8125         0.8409       0.97x
+    List                0.6511         0.4877       1.33x
+    Mandelbrot          0.5138         0.4223       1.22x
+    NBody               0.6434         0.4903       1.31x
+    Permute             0.7806         0.7666       1.02x
+    Queens              0.4708         0.4224       1.11x
+    Richards            3.0991         2.8237       1.10x
+    Sieve               0.6307         0.4168       1.51x
+    Storage             1.4025         1.3148       1.07x
+    Towers              0.9172         0.8838       1.04x
+    ----------------  --------    -----------    --------
+    Geometric mean                                 1.13x
 
 

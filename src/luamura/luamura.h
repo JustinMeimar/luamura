@@ -6,35 +6,38 @@
 #include <stdint.h>
 
 /*
- * [LMDOC] Execution model
+ * [LMDOC] Luamura
+ * 
+ * Luamura is an AOT Baseline compiler for lua. The primary goal is to
+ * eliminate the interpreters dispatch overhead. Luamura achieves this by
+ * applying the first Futamura projection, deriving a compiled binary by
+ * specializing the interpreter to a fixed bytecode.
  *
- * A compiled program is Lua plus native code. The compiler loads the
- * program with Lua, embeds its binary chunk, and compiles some of its
- * functions. At startup the runtime loads the chunk and sets the 'aot'
- * field of each compiled function's Proto to its implementation.
+ * A set of native, dispatch erased functions are emited into a binary which
+ * links liblua. Native functions can, and often do, bail out or dispatch to
+ * VM routines for garbage collection, debug handling, co-routine scheduling,
+ * etc. This is what allows Luamura to be a compliant implementation with
+ * relatively little effort. It is also limits the Baseline performance. All
+ * dispatches into the VM are opaque, and make analysis imprecise. Moreover,
+ * any VM call can mutate the stack, PC, etc, which forces native-compiled
+ * code to be defensive around each call.
  *
- * Every function is an ordinary Lua function with an ordinary CallInfo,
- * registers on the Lua stack and a saved pc. luaV_execute runs a
- * compiled function by calling its implementation instead of
- * interpreting it, unless hooks are active:
+ * To natively compile Lua, each function is a module is lexed, parsed and
+ * lowered into bytecode. A control-flow-graph (CFG) is constructed from the
+ * instructions in each function. The Baseline compiler receives the CFG and
+ * iterates over its blocks. For each bytecode instruction within a block, the
+ * IR builder emits a call to the respective op-handler function, marked with
+ * the always-inline attribute. A straight-line sequence of Lua bytecode then
+ * compiles down into each op-handler stitched together, with no dispatch
+ * overhead.
  *
- *     CallInfo* f(lua_State* L, CallInfo* ci);
+ * In order to make each op-handler visible, the interpreter is modified to
+ * expose each op-handler as a function. This slows down the interpreter by
+ * trading the computed-goto (threaded) dispatch for a slow, function call
+ * between each operation. Despite this, Luamura achieves a geomeean speedup
+ * of 1.17x on are-we-fast-yet (AWFY).
  *
- * which runs ci's function from ci->u.l.savedpc and returns the next
- * call for luaV_execute to run: a Lua function it called, its caller
- * after it returned, or NULL after returning from a fresh call. Calls
- * to Lua functions therefore return to luaV_execute, and the caller
- * later continues from its saved pc. An implementation resumes at the
- * function's start and after calls; it returns ci itself to have the
- * interpreter continue from any other pc, or when hooks have been set
- * meanwhile. A tail call to a compiled function enters its
- * implementation directly, as a tail call in C.
  *
- * Compiled code keeps registers on the Lua stack, and runs each
- * instruction with lvm.c's function for it, which LLVM inlines.
- *
- * Errors, the collector, debug information and coroutines behave as for
- * interpreted functions, because the state they inspect is the same.
  */
 
 // What compiled code calls.
