@@ -1287,6 +1287,14 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
 #undef vmgoto_l_tforcall
 #undef vmgoto_l_tforloop
 #undef vmlabel
+#undef updatetrap
+
+/*
+** Compiled code never stops for signals, so it can read 'trap' as an
+** ordinary value, and LLVM can drop reads it does not use.
+*/
+#define lm_trap(ci)	(*cast(l_signalT *, &(ci)->u.l.trap))
+#define updatetrap(ci)	(trap = lm_trap(ci))
 
 #define vmcase(op) \
   static CallInfo *op##_body (lua_State *L, CallInfo *ci, LClosure *cl, \
@@ -1297,7 +1305,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
                       Instruction i) { \
     LClosure *cl = ci_func(ci); \
     return op##_body(L, ci, cl, cl->p->k, ci->func.p + 1, *pc, \
-                    ci->u.l.trap, i, pc); \
+                    lm_trap(ci), i, pc); \
   } \
   static CallInfo *op##_body (lua_State *L, CallInfo *ci, LClosure *cl, \
                              TValue *k, StkId base, const Instruction *pc, \
