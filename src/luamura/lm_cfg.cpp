@@ -2,16 +2,24 @@
 
 #include <algorithm>
 
-namespace {
+namespace luamura {
 
-bool is_call(OpCode op) { return op == OP_CALL || op == OP_TFORCALL; }
+CFG::CFG(const Proto* proto) : proto(proto) {
+    find_leaders();
+    add_blocks(reachable());
+}
+
+bool CFG::is_call(PC pc) const {
+    OpCode op = GET_OPCODE(proto->code[pc]);
+    return op == OP_CALL || op == OP_TFORCALL;
+}
 
 // The pcs the instruction at 'pc' may continue at, the most common
 // first.
-std::vector<int> successors(const Proto* p, int pc) {
-    Instruction i = p->code[pc];
+std::vector<PC> CFG::successor_pcs(PC pc) const {
+    Instruction i = proto->code[pc];
     OpCode op = GET_OPCODE(i);
-    int next = pc + 1;
+    PC next = pc + 1;
     switch (op) {
     case OP_JMP:
         return {next + GETARG_sJ(i)};
@@ -33,8 +41,8 @@ std::vector<int> successors(const Proto* p, int pc) {
     case OP_GEI:
     case OP_TEST:
     case OP_TESTSET: {
-        int skip = next + 1;
-        int jump = skip + GETARG_sJ(p->code[next]);
+        PC skip = next + 1;
+        PC jump = skip + GETARG_sJ(proto->code[next]);
         if (jump == skip)
             return {skip};
         return {jump, skip};
@@ -64,59 +72,61 @@ std::vector<int> successors(const Proto* p, int pc) {
 
 // A block ends where control may go anywhere but the next instruction,
 // and after calls, where Lua resumes the function.
-std::vector<bool> leaders(const Proto* proto) {
-    int n = proto->sizecode;
-    std::vector<bool> leader(n, false);
+void CFG::find_leaders() {
+    PC n = proto->sizecode;
+    leader.assign(n, false);
     leader[0] = true;
-    for (int pc = 0; pc < n; pc++) {
-        std::vector<int> next = successors(proto, pc);
+    for (PC pc = 0; pc < n; pc++) {
+        std::vector<PC> next = successor_pcs(pc);
         bool falls = next.size() == 1 && next[0] == pc + 1;
-        if (falls && !is_call(GET_OPCODE(proto->code[pc])))
+        if (falls && !is_call(pc))
             continue;
-        for (int s : next)
+        for (PC s : next)
             leader[s] = true;
         if (pc + 1 < n)
             leader[pc + 1] = true;
     }
-    return leader;
 }
 
-} // namespace
+PC CFG::block_end(PC start) const {
+    return static_cast<PC>(
+        std::find(leader.begin() + start + 1, leader.end(), true) -
+        leader.begin());
+}
 
-CFG::CFG(const Proto* proto) {
-    int n = proto->sizecode;
-    std::vector<bool> leader = leaders(proto);
-    auto end_of = [&](int start) {
-        return static_cast<int>(
-            std::find(leader.begin() + start + 1, leader.end(), true) -
-            leader.begin());
-    };
-
-    std::vector<bool> reached(n, false);
-    std::vector<int> work = {0};
+// whether each pc starts a block that Lua can reach
+std::vector<bool> CFG::reachable() const {
+    std::vector<bool> reached(proto->sizecode, false);
+    std::vector<PC> work = {0};
     while (!work.empty()) {
-        int start = work.back();
+        PC start = work.back();
         work.pop_back();
         if (reached[start])
             continue;
         reached[start] = true;
-        for (int s : successors(proto, end_of(start) - 1))
+        for (PC s : successor_pcs(block_end(start) - 1))
             work.push_back(s);
     }
+    return reached;
+}
 
-    // the block starting at each pc, or -1
-    std::vector<int> index(n, -1);
-    for (int pc = 0; pc < n; pc++) {
+void CFG::add_blocks(const std::vector<bool>& reached) {
+    PC n = proto->sizecode;
+    // the block starting at each reached pc
+    std::vector<BlockIndex> index(n);
+    for (PC pc = 0; pc < n; pc++) {
         if (!reached[pc])
             continue;
-        index[pc] = static_cast<int>(blocks.size());
-        blocks.push_back({pc, end_of(pc), {}});
+        index[pc] = static_cast<BlockIndex>(blocks.size());
+        blocks.push_back({pc, block_end(pc), {}});
     }
     entries.push_back(0);
     for (Block& b : blocks) {
-        for (int s : successors(proto, b.last()))
+        for (PC s : successor_pcs(b.last()))
             b.successors.push_back(index[s]);
-        if (is_call(GET_OPCODE(proto->code[b.last()])))
+        if (is_call(b.last()))
             entries.push_back(b.successors.front());
     }
 }
+
+} // namespace luamura

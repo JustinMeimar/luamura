@@ -3,19 +3,27 @@
 
 #include "lm_lua.h"
 
+#include <cstdint>
 #include <vector>
+
+namespace luamura {
+
+// an instruction's index in its function's code; signed, as jumps are
+using PC = int32_t;
 
 // The control-flow graph of a function's bytecode, with the blocks Lua
 // can reach, in pc order.
 class CFG {
 public:
-    struct Block {
-        int start;
-        int end;
-        // indices in blocks, the most common first
-        std::vector<int> successors;
+    using BlockIndex = uint32_t;
 
-        int last() const { return end - 1; }
+    struct Block {
+        PC start;
+        PC end;
+        // the most common first
+        std::vector<BlockIndex> successors;
+
+        PC last() const { return end - 1; }
     };
 
     explicit CFG(const Proto* proto);
@@ -23,7 +31,21 @@ public:
     std::vector<Block> blocks;
     // The blocks where Lua may enter the function: its start, and after
     // each call, once the callee returns.
-    std::vector<int> entries;
+    std::vector<BlockIndex> entries;
+
+private:
+    bool is_call(PC pc) const;
+    std::vector<PC> successor_pcs(PC pc) const;
+    void find_leaders();
+    PC block_end(PC start) const;
+    std::vector<bool> reachable() const;
+    void add_blocks(const std::vector<bool>& reached);
+
+    const Proto* proto;
+    // whether a block starts at each pc
+    std::vector<bool> leader;
 };
+
+} // namespace luamura
 
 #endif // LM_CFG_H

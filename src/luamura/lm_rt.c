@@ -5,14 +5,15 @@
 #include "lfunc.h"
 #include "lualib.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 
 static const char* progname = "luamura";
 
 const Instruction* lm_code(CallInfo* ci) { return ci_func(ci)->p->code; }
 
-int lm_resume(CallInfo* ci) {
-    return cast_int(ci->u.l.savedpc - ci_func(ci)->p->code);
+int32_t lm_resume(CallInfo* ci) {
+    return (int32_t)(ci->u.l.savedpc - ci_func(ci)->p->code);
 }
 
 // The implementation to run ci with, or NULL to interpret it.
@@ -20,13 +21,16 @@ lua_AotFunction lm_compiled(lua_State* L, CallInfo* ci) {
     return L->hookmask ? NULL : ci_func(ci)->p->aot;
 }
 
-static int attach(Proto* p, int next) {
-    if (next < 0 || next >= lm_nfunctions)
-        return -1;
-    p->aot = lm_functions[next++];
-    for (int i = 0; i < p->sizep && next >= 0; i++)
-        next = attach(p->p[i], next);
-    return next;
+// Attaches the functions from 'next' on to p and its nested Protos, in
+// preorder, as the compiler emitted them.
+static bool attach(Proto* p, uint32_t* next) {
+    if (*next >= lm_nfunctions)
+        return false;
+    p->aot = lm_functions[(*next)++];
+    for (int i = 0; i < p->sizep; i++)
+        if (!attach(p->p[i], next))
+            return false;
+    return true;
 }
 
 static void report(lua_State* L, int status) {
@@ -67,7 +71,8 @@ static int run(lua_State* L) {
         return 0;
     }
     Proto* main = clLvalue(s2v(L->top.p - 1))->p;
-    if (attach(main, 0) != lm_nfunctions)
+    uint32_t attached = 0;
+    if (!attach(main, &attached) || attached != lm_nfunctions)
         return luaL_error(L, "compiled functions do not match the chunk");
 
     const char* script = getstr(main->source);

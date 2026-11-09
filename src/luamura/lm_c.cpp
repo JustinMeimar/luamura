@@ -10,6 +10,8 @@
 #include <iostream>
 #include <string>
 
+namespace luamura {
+
 static int append(lua_State*, const void* data, size_t size, void* out) {
     static_cast<std::string*>(out)->append(static_cast<const char*>(data),
                                            size);
@@ -60,6 +62,8 @@ static void optimize(llvm::Module& module) {
         .run(module, mam);
 }
 
+} // namespace luamura
+
 int main(int argc, char* argv[]) {
     if (argc != 3) {
         std::cerr << "usage: luamura <input.lua> <output.ll>\n";
@@ -73,14 +77,15 @@ int main(int argc, char* argv[]) {
     }
     const Proto* main = clLvalue(s2v(L->top.p - 1))->p;
     std::string chunk;
-    lua_dump(L, append, &chunk, 0);
+    lua_dump(L, luamura::append, &chunk, 0);
 
     llvm::LLVMContext context;
-    auto module = compile_module(context, main, chunk);
+    auto module = luamura::compile_module(context, main, chunk);
     lua_close(L);
-    if (llvm::verifyModule(*module, &llvm::errs()) || !link_lvm(*module))
+    if (llvm::verifyModule(*module, &llvm::errs()) ||
+        !luamura::link_lvm(*module))
         return 1;
-    optimize(*module);
+    luamura::optimize(*module);
 
     std::error_code ec;
     llvm::raw_fd_ostream out(argv[2], ec);
