@@ -18,7 +18,7 @@ namespace luamura {
 // function that runs its instructions on the Lua stack, with lvm.c's
 // function for each instruction.
 std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
-                                             const Proto* main,
+                                             const Proto& main,
                                              const std::string& chunk);
 
 // What luaV_execute keeps while running a function.
@@ -44,10 +44,16 @@ protected:
     llvm::PointerType* ptr_ty;
     llvm::IntegerType* i32_ty;
     llvm::IntegerType* i64_ty;
+    llvm::IntegerType* instruction_ty;
     // lua_AotFunction
     llvm::FunctionType* aot_function_ty;
     // lvm.c's function for an instruction
     llvm::FunctionType* op_handler_ty;
+
+    // the runtime functions compiled code calls
+    llvm::FunctionCallee lm_code;
+    llvm::FunctionCallee lm_resume;
+    llvm::FunctionCallee lm_compiled;
 };
 
 // The Futamura projection of a block: luaV_execute specialized to the
@@ -86,6 +92,7 @@ private:
     void to_successors(const CFG::Block& block);
     void after_call(llvm::Value* next, llvm::BasicBlock* successor);
     void tail_call(llvm::Value* next);
+    void return_if(llvm::Value* condition, llvm::Value* value);
     llvm::BasicBlock* create_block(const llvm::Twine& name = "");
 
     const Proto& proto;

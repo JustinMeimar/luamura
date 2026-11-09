@@ -4,22 +4,30 @@
 
 namespace luamura {
 
-CFG::CFG(const Proto* proto) : proto(proto) {
+CFG::CFG(const Proto& proto) : proto(proto) {
     find_leaders();
     add_blocks(reachable());
 }
 
 bool CFG::is_call(PC pc) const {
-    OpCode op = GET_OPCODE(proto->code[pc]);
+    OpCode op = GET_OPCODE(proto.code[pc]);
     return op == OP_CALL || op == OP_TFORCALL;
 }
 
 // The pcs the instruction at 'pc' may continue at, the most common
 // first.
 std::vector<PC> CFG::successor_pcs(PC pc) const {
-    Instruction i = proto->code[pc];
+    Instruction i = proto.code[pc];
     OpCode op = GET_OPCODE(i);
     PC next = pc + 1;
+    // a test either takes the jump after it or skips it
+    if (testTMode(op)) {
+        PC skip = next + 1;
+        PC jump = skip + GETARG_sJ(proto.code[next]);
+        if (jump == skip)
+            return {skip};
+        return {jump, skip};
+    }
     switch (op) {
     case OP_JMP:
         return {next + GETARG_sJ(i)};
@@ -29,24 +37,6 @@ std::vector<PC> CFG::successor_pcs(PC pc) const {
     case OP_TAILCALL:
     case OP_EXTRAARG:
         return {};
-    // a test either takes the jump after it or skips it
-    case OP_EQ:
-    case OP_LT:
-    case OP_LE:
-    case OP_EQK:
-    case OP_EQI:
-    case OP_LTI:
-    case OP_LEI:
-    case OP_GTI:
-    case OP_GEI:
-    case OP_TEST:
-    case OP_TESTSET: {
-        PC skip = next + 1;
-        PC jump = skip + GETARG_sJ(proto->code[next]);
-        if (jump == skip)
-            return {skip};
-        return {jump, skip};
-    }
     case OP_FORLOOP:
     case OP_TFORLOOP:
         return {next - GETARG_Bx(i), next};
@@ -73,7 +63,7 @@ std::vector<PC> CFG::successor_pcs(PC pc) const {
 // A block ends where control may go anywhere but the next instruction,
 // and after calls, where Lua resumes the function.
 void CFG::find_leaders() {
-    PC n = proto->sizecode;
+    PC n = proto.sizecode;
     leader.assign(n, false);
     leader[0] = true;
     for (PC pc = 0; pc < n; pc++) {
@@ -96,7 +86,7 @@ PC CFG::block_end(PC start) const {
 
 // whether each pc starts a block that Lua can reach
 std::vector<bool> CFG::reachable() const {
-    std::vector<bool> reached(proto->sizecode, false);
+    std::vector<bool> reached(proto.sizecode, false);
     std::vector<PC> work = {0};
     while (!work.empty()) {
         PC start = work.back();
@@ -111,7 +101,7 @@ std::vector<bool> CFG::reachable() const {
 }
 
 void CFG::add_blocks(const std::vector<bool>& reached) {
-    PC n = proto->sizecode;
+    PC n = proto.sizecode;
     // the block starting at each reached pc
     std::vector<BlockIndex> index(n);
     for (PC pc = 0; pc < n; pc++) {

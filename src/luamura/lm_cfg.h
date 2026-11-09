@@ -26,7 +26,7 @@ public:
         PC last() const { return end - 1; }
     };
 
-    explicit CFG(const Proto* proto);
+    explicit CFG(const Proto& proto);
 
     std::vector<Block> blocks;
     // The blocks where Lua may enter the function: its start, and after
@@ -41,7 +41,7 @@ private:
     std::vector<bool> reachable() const;
     void add_blocks(const std::vector<bool>& reached);
 
-    const Proto* proto;
+    const Proto& proto;
     // whether a block starts at each pc
     std::vector<bool> leader;
 };

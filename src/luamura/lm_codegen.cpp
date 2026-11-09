@@ -15,10 +15,15 @@ namespace luamura {
 Compiler::Compiler(llvm::Module& module, llvm::IRBuilder<>& builder)
     : module(module), context(module.getContext()), builder(builder),
       ptr_ty(builder.getPtrTy()), i32_ty(builder.getInt32Ty()),
-      i64_ty(builder.getInt64Ty()), aot_function_ty(llvm::FunctionType::get(
-                                        ptr_ty, {ptr_ty, ptr_ty}, false)),
+      i64_ty(builder.getInt64Ty()), instruction_ty(builder.getInt32Ty()),
+      aot_function_ty(
+          llvm::FunctionType::get(ptr_ty, {ptr_ty, ptr_ty}, false)),
       op_handler_ty(llvm::FunctionType::get(
-          ptr_ty, {ptr_ty, ptr_ty, ptr_ty, i32_ty}, false)) {}
+          ptr_ty, {ptr_ty, ptr_ty, ptr_ty, instruction_ty}, false)),
+      lm_code(module.getOrInsertFunction("lm_code", ptr_ty, ptr_ty)),
+      lm_resume(module.getOrInsertFunction("lm_resume", i32_ty, ptr_ty)),
+      lm_compiled(module.getOrInsertFunction("lm_compiled", ptr_ty, ptr_ty,
+                                             ptr_ty)) {}
 
 BlockCompiler::BlockCompiler(const Compiler& compiler, const Proto& proto,
                              const Frame& frame)
@@ -34,9 +39,9 @@ llvm::Value* BlockCompiler::compile(const CFG::Block& block) {
 llvm::Value* BlockCompiler::project_op_handler(PC pc) {
     Instruction i = proto.code[pc];
     // the interpreter's pc after fetching i
-    builder.CreateStore(
-        builder.CreateConstInBoundsGEP1_32(i32_ty, frame.code, pc + 1),
-        frame.pc);
+    builder.CreateStore(builder.CreateConstInBoundsGEP1_32(
+                            instruction_ty, frame.code, pc + 1),
+                        frame.pc);
     auto* call = builder.CreateCall(
         module.getOrInsertFunction(std::string("luaV_OP_") +
                                        opnames[GET_OPCODE(i)],
@@ -48,7 +53,7 @@ llvm::Value* BlockCompiler::project_op_handler(PC pc) {
 
 FunctionCompiler::FunctionCompiler(const Compiler& compiler,
                                    const Proto& proto)
-    : Compiler(compiler), proto(proto), cfg(&proto) {}
+    : Compiler(compiler), proto(proto), cfg(proto) {}
 
 llvm::BasicBlock* FunctionCompiler::create_block(const llvm::Twine& name) {
     return llvm::BasicBlock::Create(context, name, function);
@@ -84,11 +89,8 @@ llvm::Function* FunctionCompiler::compile(const llvm::Twine& name) {
 // Resumes at the saved pc: the function's start, or after a call.
 void FunctionCompiler::enter() {
     frame.pc = builder.CreateAlloca(ptr_ty);
-    frame.code = builder.CreateCall(
-        module.getOrInsertFunction("lm_code", ptr_ty, ptr_ty), {frame.ci});
-    auto* saved = builder.CreateCall(
-        module.getOrInsertFunction("lm_resume", i32_ty, ptr_ty),
-        {frame.ci});
+    frame.code = builder.CreateCall(lm_code, {frame.ci});
+    auto* saved = builder.CreateCall(lm_resume, {frame.ci});
     auto* resume = builder.CreateSwitch(saved, interpret);
     for (CFG::BlockIndex e : cfg.entries)
         resume->addCase(builder.getInt32(cfg.blocks[e].start),
@@ -122,7 +124,7 @@ void FunctionCompiler::to_successors(const CFG::Block& block) {
         return;
     }
     auto* moved = builder.CreatePtrDiff(
-        i32_ty, builder.CreateLoad(ptr_ty, frame.pc), frame.code);
+        instruction_ty, builder.CreateLoad(ptr_ty, frame.pc), frame.code);
     auto* to = builder.CreateSwitch(moved, llvm_blocks[targets.front()]);
     for (CFG::BlockIndex t : llvm::drop_begin(targets))
         to->addCase(builder.getInt64(cfg.blocks[t].start), llvm_blocks[t]);
@@ -133,13 +135,7 @@ void FunctionCompiler::to_successors(const CFG::Block& block) {
 // the interpreter runs.
 void FunctionCompiler::after_call(llvm::Value* next,
                                   llvm::BasicBlock* successor) {
-    auto* returned = create_block();
-    auto* called = create_block();
-    builder.CreateCondBr(builder.CreateIsNull(next), returned, called);
-    builder.SetInsertPoint(called);
-    builder.CreateRet(next);
-    builder.SetInsertPoint(returned);
-
+    return_if(builder.CreateIsNotNull(next), next);
     // volatile, as signal handlers set it
     auto* hookmask = builder.CreateLoad(
         i32_ty,
@@ -153,36 +149,34 @@ void FunctionCompiler::after_call(llvm::Value* next,
 // A Lua callee replaces this function in ci. Entering its native code
 // as a tail call keeps the C stack from growing.
 void FunctionCompiler::tail_call(llvm::Value* next) {
-    auto* callee = create_block();
-    auto* compiled = create_block();
-    auto* done = create_block();
-    builder.CreateCondBr(builder.CreateICmpEQ(next, frame.ci), callee,
-                         done);
-    builder.SetInsertPoint(done);
-    builder.CreateRet(next);
-
-    builder.SetInsertPoint(callee);
-    auto* native = builder.CreateCall(
-        module.getOrInsertFunction("lm_compiled", ptr_ty, ptr_ty, ptr_ty),
-        {frame.L, frame.ci});
-    builder.CreateCondBr(builder.CreateIsNull(native), done, compiled);
-    builder.SetInsertPoint(compiled);
+    return_if(builder.CreateICmpNE(next, frame.ci), next);
+    auto* native = builder.CreateCall(lm_compiled, {frame.L, frame.ci});
+    return_if(builder.CreateIsNull(native), next);
     auto* call =
         builder.CreateCall(aot_function_ty, native, {frame.L, frame.ci});
     call->setTailCallKind(llvm::CallInst::TCK_MustTail);
     builder.CreateRet(call);
 }
 
+void FunctionCompiler::return_if(llvm::Value* condition,
+                                 llvm::Value* value) {
+    auto* returns = create_block();
+    auto* continues = create_block();
+    builder.CreateCondBr(condition, returns, continues);
+    builder.SetInsertPoint(returns);
+    builder.CreateRet(value);
+    builder.SetInsertPoint(continues);
+}
+
 void ModuleCompiler::compile(const Proto& main, const std::string& chunk) {
     compile_function(main);
     define("lm_chunk",
            llvm::ConstantDataArray::getString(context, chunk, false));
-    define("lm_chunk_size", llvm::ConstantInt::get(i64_ty, chunk.size()));
+    define("lm_chunk_size", builder.getInt64(chunk.size()));
     define("lm_functions",
            llvm::ConstantArray::get(
                llvm::ArrayType::get(ptr_ty, functions.size()), functions));
-    define("lm_nfunctions",
-           llvm::ConstantInt::get(i32_ty, functions.size()));
+    define("lm_nfunctions", builder.getInt32(functions.size()));
 }
 
 void ModuleCompiler::define(const char* name, llvm::Constant* value) {
@@ -201,11 +195,11 @@ void ModuleCompiler::compile_function(const Proto& proto) {
 }
 
 std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
-                                             const Proto* main,
+                                             const Proto& main,
                                              const std::string& chunk) {
     auto module = std::make_unique<llvm::Module>("luamura", context);
     llvm::IRBuilder<> builder(context);
-    ModuleCompiler(*module, builder).compile(*main, chunk);
+    ModuleCompiler(*module, builder).compile(main, chunk);
     return module;
 }
 
