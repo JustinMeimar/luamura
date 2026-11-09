@@ -1,7 +1,7 @@
-#ifndef LMCFG_H
-#define LMCFG_H
+#ifndef LM_CFG_H
+#define LM_CFG_H
 
-#include "lmlua.h"
+#include "lm_lua.h"
 
 #include <vector>
 
@@ -26,4 +26,4 @@ public:
     std::vector<int> entries;
 };
 
-#endif // LMCFG_H
+#endif // LM_CFG_H

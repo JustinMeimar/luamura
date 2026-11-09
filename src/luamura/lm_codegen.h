@@ -1,7 +1,7 @@
-#ifndef LMCODEGEN_H
-#define LMCODEGEN_H
+#ifndef LM_CODEGEN_H
+#define LM_CODEGEN_H
 
-#include "lmlua.h"
+#include "lm_lua.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -16,4 +16,4 @@ std::unique_ptr<llvm::Module> compile_module(llvm::LLVMContext& context,
                                              const Proto* main,
                                              const std::string& chunk);
 
-#endif // LMCODEGEN_H
+#endif // LM_CODEGEN_H

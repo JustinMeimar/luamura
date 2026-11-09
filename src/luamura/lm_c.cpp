@@ -4,8 +4,8 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "lmcodegen.h"
-#include "lmlua.h"
+#include "lm_codegen.h"
+#include "lm_lua.h"
 
 #include <iostream>
 #include <string>

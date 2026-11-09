@@ -22,7 +22,7 @@ compile file profile="release": (build profile)
     build/{{profile}}/luamura {{file}} build/{{profile}}/out/{{file_stem(file)}}.ll
     llc {{ if profile == "debug" { "-O0" } else { "-O2" } }} --relocation-model=pic -filetype=obj \
         build/{{profile}}/out/{{file_stem(file)}}.ll -o build/{{profile}}/out/{{file_stem(file)}}.o
-    cc build/{{profile}}/out/{{file_stem(file)}}.o build/{{profile}}/lmrt.o build/{{profile}}/liblua.a \
+    cc build/{{profile}}/out/{{file_stem(file)}}.o build/{{profile}}/lm_rt.o build/{{profile}}/liblua.a \
         -Wl,-E -ldl -lm -o build/{{profile}}/out/{{file_stem(file)}}
 
 # compile and run a Lua program

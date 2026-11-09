@@ -1,5 +1,5 @@
-#include "lmcodegen.h"
-#include "lmcfg.h"
+#include "lm_codegen.h"
+#include "lm_cfg.h"
 
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/Constants.h>
