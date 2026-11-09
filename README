@@ -55,7 +55,7 @@ overhead.
 In order to make each op-handler visible, the interpreter is modified to
 also expose each op-handler as a function. The interpreter retains its
 computed-goto (threaded) dispatch. Luamura achieves a geometric mean speedup
-of 1.13x on Are We Fast Yet? (AWFY) in the run below.
+of 1.19x on Are We Fast Yet? (AWFY) in the run below.
 
 
 1 - AWFY Benchmarks
@@ -63,21 +63,21 @@ of 1.13x on Are We Fast Yet? (AWFY) in the run below.
 
     Benchmark          Lua (s)     luamura (s)     Speedup
     ----------------  --------    -----------    --------
-    Bounce              0.9003         0.7543       1.19x
-    CD                  2.0736         1.9892       1.04x
-    DeltaBlue           0.6781         0.6914       0.98x
-    Havlak              5.5472         5.4378       1.02x
-    Json                0.8125         0.8409       0.97x
-    List                0.6511         0.4877       1.33x
-    Mandelbrot          0.5138         0.4223       1.22x
-    NBody               0.6434         0.4903       1.31x
-    Permute             0.7806         0.7666       1.02x
-    Queens              0.4708         0.4224       1.11x
-    Richards            3.0991         2.8237       1.10x
-    Sieve               0.6307         0.4168       1.51x
-    Storage             1.4025         1.3148       1.07x
-    Towers              0.9172         0.8838       1.04x
+    Bounce              0.8968         0.6929       1.29x
+    CD                  2.0486         1.8946       1.08x
+    DeltaBlue           0.6643         0.5932       1.12x
+    Havlak              5.3710         5.2363       1.03x
+    Json                0.8337         0.7955       1.05x
+    List                0.6362         0.4968       1.28x
+    Mandelbrot          0.5281         0.3631       1.45x
+    NBody               0.6402         0.4605       1.39x
+    Permute             0.7977         0.7204       1.11x
+    Queens              0.4673         0.4086       1.14x
+    Richards            3.0171         2.7211       1.11x
+    Sieve               0.6137         0.3718       1.65x
+    Storage             1.4100         1.2773       1.10x
+    Towers              0.9097         0.8556       1.06x
     ----------------  --------    -----------    --------
-    Geometric mean                                 1.13x
+    Geometric mean                                 1.19x
 
 
