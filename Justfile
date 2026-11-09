@@ -1,51 +1,73 @@
-# luamura: build, test, compile and debug Lua programs.
-# profile is release (-O2) or debug (-O0); each builds in build/<profile>.
-
+# Use `just profile=debug build` for an unoptimized compiler and runtime.
 set shell := ["bash", "-euo", "pipefail", "-c"]
+set positional-arguments
 
-make := "make --no-print-directory -C src/luamura -j" + num_cpus()
+profile := "release"
+opt := if profile == "release" {
+    "-O2"
+} else if profile == "debug" {
+    "-O0"
+} else {
+    error("profile must be release or debug")
+}
+build_dir := "build" / profile
+out := build_dir / "out"
+make := "make --no-print-directory -C src/luamura -j" + num_cpus() \
+    + " BUILD=../../" + build_dir + " OPT=" + opt
 
 default:
     @just --list
 
-# build luamura, its runtime and Lua, recording compile_commands.json
-build profile="release":
-    bear --append --output compile_commands.json -- {{make}} BUILD=../../build/{{profile}} OPT={{ if profile == "debug" { "-O0" } else { "-O2" } }}
+# Build the compiler, runtime and interpreter; update compile_commands.json.
+build:
+    bear --append --output compile_commands.json -- {{make}} all ../../{{build_dir}}/lua
 
-# run tests: all, internal, lua-test, or one test such as internal/010_base
-test target="all" profile="release": (build profile)
-    {{make}} -k BUILD=../../build/{{profile}} {{ if target == "all" { "check" } else if target == "internal" { "check-internal" } else if target == "lua-test" { "check-lua-test" } else { target + ".run" } }}
+# Test all, internal, lua-test, or a case such as internal/010_base.
+test target="all": build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$1" in
+        all)      target=check ;;
+        internal) target=check-internal ;;
+        lua-test) target=check-lua-test ;;
+        *)        target="$1.run" ;;
+    esac
+    {{make}} -k "$target"
 
-# compile a Lua program to build/<profile>/out/<name>
-compile file profile="release": (build profile)
-    mkdir -p build/{{profile}}/out
-    build/{{profile}}/luamura {{file}} build/{{profile}}/out/{{file_stem(file)}}.ll
-    llc {{ if profile == "debug" { "-O0" } else { "-O2" } }} --relocation-model=pic -filetype=obj \
-        build/{{profile}}/out/{{file_stem(file)}}.ll -o build/{{profile}}/out/{{file_stem(file)}}.o
-    cc build/{{profile}}/out/{{file_stem(file)}}.o build/{{profile}}/lm_rt.o build/{{profile}}/liblua.a \
-        -Wl,-E -ldl -lm -o build/{{profile}}/out/{{file_stem(file)}}
+# Compile a Lua program to build/<profile>/out/<name>.
+compile file: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exe={{quote(out / file_stem(file))}}
+    mkdir -p {{quote(out)}}
+    {{build_dir}}/luamura "$1" "$exe.ll"
+    llc {{opt}} --relocation-model=pic -filetype=obj "$exe.ll" -o "$exe.o"
+    cc "$exe.o" {{build_dir}}/lm_rt.o {{build_dir}}/liblua.a \
+        -Wl,-E -ldl -lm -o "$exe"
 
-# compile and run a Lua program
+# Compile and run a Lua program.
 run file *args: (compile file)
-    build/release/out/{{file_stem(file)}} {{args}}
+    {{quote(out / file_stem(file))}} "${@:2}"
 
-# run a Lua program with the reference interpreter
-interpret file *args: (build)
-    {{make}} ../../build/release/lua
-    build/release/lua {{file}} {{args}}
+# Run with the reference interpreter.
+interpret file *args: build
+    {{build_dir}}/lua "$@"
 
-# print the LLVM IR luamura emits for a program
-ir file: (build)
-    build/release/luamura {{file}} /dev/stdout
+# Print the generated LLVM IR.
+ir file: build
+    {{build_dir}}/luamura "$1" /dev/stdout
 
-# debug a compiled program in gdb
-debug file *args: (compile file "debug")
-    gdb --args build/debug/out/{{file_stem(file)}} {{args}}
+# Debug a compiled program.
+debug file *args:
+    just profile=debug compile "$1"
+    gdb --args {{quote("build/debug/out" / file_stem(file))}} "${@:2}"
 
-# debug the compiler itself in gdb, compiling a program
-debug-compiler file: (build "debug")
+# Debug the compiler while compiling a program.
+debug-compiler file:
+    just profile=debug build
     mkdir -p build/debug/out
-    gdb --args build/debug/luamura {{file}} build/debug/out/{{file_stem(file)}}.ll
+    gdb --args build/debug/luamura "$1" \
+        {{quote("build/debug/out" / file_stem(file) + ".ll")}}
 
 clean:
     rm -rf build
