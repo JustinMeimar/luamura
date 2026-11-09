@@ -34,8 +34,7 @@
  * In order to make each op-handler visible, the interpreter is modified to
  * expose each op-handler as a function. This slows down the interpreter by
  * trading the computed-goto (threaded) dispatch for a slow, function call
- * between each operation. Despite this, Luamura achieves a geomeean speedup
- * of 1.17x on are-we-fast-yet (AWFY).
+ * between each operation.
  *
  *
  */
