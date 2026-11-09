@@ -22,20 +22,24 @@ alignas(4) static const unsigned char lvm_bitcode[] = {
 #embed "lvm.bc"
 };
 
-// The compiled code calls lvm.c's function for each instruction. Linking
-// their bodies in lets LLVM inline them; liblua defines the rest.
-static bool linkLVM(llvm::Module& module) {
+alignas(4) static const unsigned char ltable_bitcode[] = {
+#embed "ltable.bc"
+};
+
+static bool linkBitcode(llvm::Module& module,
+                        llvm::ArrayRef<unsigned char> bitcode,
+                        llvm::StringRef name) {
     llvm::MemoryBufferRef buffer(
-        llvm::StringRef(reinterpret_cast<const char*>(lvm_bitcode),
-                        sizeof lvm_bitcode),
-        "lvm.bc");
-    auto lvm = llvm::parseBitcodeFile(buffer, module.getContext());
-    if (!lvm) {
-        llvm::logAllUnhandledErrors(lvm.takeError(), llvm::errs(),
+        llvm::StringRef(reinterpret_cast<const char*>(bitcode.data()),
+                        bitcode.size()),
+        name);
+    auto linked = llvm::parseBitcodeFile(buffer, module.getContext());
+    if (!linked) {
+        llvm::logAllUnhandledErrors(linked.takeError(), llvm::errs(),
                                     "luamura: ");
         return false;
     }
-    for (llvm::Function& f : **lvm) {
+    for (llvm::Function& f : **linked) {
         // llc chooses the target, and inlining needs them to agree
         f.removeFnAttr("target-cpu");
         f.removeFnAttr("target-features");
@@ -43,8 +47,17 @@ static bool linkLVM(llvm::Module& module) {
         if (!f.isDeclaration() && !f.hasLocalLinkage())
             f.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
     }
-    return !llvm::Linker::linkModules(module, std::move(*lvm),
+    return !llvm::Linker::linkModules(module, std::move(*linked),
                                       llvm::Linker::LinkOnlyNeeded);
+}
+
+// The compiled code calls lvm.c's function for each instruction, and
+// they call ltable.c's. Linking their bodies in lets LLVM inline them;
+// liblua defines the rest. lvm.c comes first, so that only the table
+// functions it needs are linked.
+static bool linkLua(llvm::Module& module) {
+    return linkBitcode(module, lvm_bitcode, "lvm.bc") &&
+           linkBitcode(module, ltable_bitcode, "ltable.bc");
 }
 
 static void optimize(llvm::Module& module) {
@@ -83,7 +96,7 @@ int main(int argc, char* argv[]) {
     auto module = luamura::compileModule(context, *main, chunk);
     lua_close(L);
     if (llvm::verifyModule(*module, &llvm::errs()) ||
-        !luamura::linkLVM(*module))
+        !luamura::linkLua(*module))
         return 1;
     luamura::optimize(*module);
 

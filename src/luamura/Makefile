@@ -25,8 +25,8 @@ OBJ= $(BUILD)/obj
 LUA_O= $(patsubst ../%.c,$(OBJ)/lua/%.o, \
 	$(filter-out ../lua.c ../luac.c,$(wildcard ../*.c)))
 LUA_A= $(BUILD)/liblua.a
-# lvm.c as bitcode, which luamura embeds to inline its instructions
-LVM_BC= $(OBJ)/lua/lvm.bc
+# lvm.c and ltable.c as bitcode, which luamura embeds to inline them
+BITCODE= $(OBJ)/lua/lvm.bc $(OBJ)/lua/ltable.bc
 LUA_T= $(BUILD)/lua
 LUAMURA_T= $(BUILD)/luamura
 LUAMURA_O= $(addprefix $(OBJ)/luamura/, \
@@ -54,7 +54,7 @@ $(OBJ)/lua/%.o: ../%.c $(wildcard ../*.h) | $(OBJ)/lua
 
 # Always optimized, which inlines each instruction's body into its
 # function.
-$(LVM_BC): ../lvm.c $(wildcard ../*.h) | $(OBJ)/lua
+$(OBJ)/lua/%.bc: ../%.c $(wildcard ../*.h) | $(OBJ)/lua
 	$(CLANG) -O2 -DLUAMURA $(SYSCFLAGS) -emit-llvm -c -o $@ $<
 
 $(LUA_A): $(LUA_O)
@@ -97,7 +97,7 @@ clean:
 
 $(OBJ)/luamura/lm_c.o: lm_c.cpp lm_codegen.h lm_lua.h ../lauxlib.h \
  ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h \
- ../lstate.h ../ltm.h ../lzio.h ../lmem.h $(LVM_BC)
+ ../lstate.h ../ltm.h ../lzio.h ../lmem.h $(BITCODE)
 $(OBJ)/luamura/lm_cfg.o: lm_cfg.cpp lm_cfg.h lm_lua.h ../lauxlib.h \
  ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h \
  ../lstate.h ../ltm.h ../lzio.h ../lmem.h
