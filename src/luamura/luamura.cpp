@@ -7,6 +7,7 @@
 #include "lm_codegen.h"
 #include "lm_lua.h"
 
+#include <cstdint>
 #include <iostream>
 #include <string>
 
@@ -46,7 +47,7 @@
 
 namespace luamura {
 
-#define LUAMURA_PRECOMP alignas(4) static const unsigned char
+#define LUAMURA_PRECOMP alignas(4) static const uint8_t
 
 LUAMURA_PRECOMP lvm_bitcode[] = {
 #embed "lvm.bc"
@@ -57,7 +58,7 @@ LUAMURA_PRECOMP ltable_bitcode[] = {
 };
 
 static bool linkBitcode(llvm::Module& module,
-                        llvm::ArrayRef<unsigned char> bitcode,
+                        llvm::ArrayRef<uint8_t> bitcode,
                         llvm::StringRef name) {
     llvm::MemoryBufferRef buffer(
         llvm::StringRef(reinterpret_cast<const char*>(bitcode.data()),

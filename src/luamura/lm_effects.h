@@ -18,21 +18,21 @@ public:
 
 private:
     void findCapturedSlots();
-    bool reads(unsigned slot) const;
-    bool writes(unsigned slot) const;
+    bool reads(FrameSlot slot) const;
+    bool writes(FrameSlot slot) const;
 
-    void read(unsigned slot);
-    void write(unsigned slot);
-    void readRange(unsigned from, unsigned to);
-    void writeRange(unsigned from, unsigned to);
+    void read(FrameSlot slot);
+    void write(FrameSlot slot);
+    void readRange(FrameSlot from, FrameSlot to);
+    void writeRange(FrameSlot from, FrameSlot to);
     void runsLua();
-    unsigned upTo(unsigned count, unsigned end) const;
+    FrameSlot upTo(uint32_t count, FrameSlot end) const;
 
     LmIR& ir;
-    unsigned top;
+    FrameSlot top;
     // slots that closures capture, which Lua code can change through
     // open upvalues
-    std::vector<unsigned> captured;
+    std::vector<FrameSlot> captured;
     Node* node = nullptr;
 };
 

@@ -34,13 +34,13 @@ static bool attach(Proto* p, uint32_t* next) {
     if (*next >= lm_nfunctions)
         return false;
     p->aot = lm_functions[(*next)++];
-    for (int i = 0; i < p->sizep; i++)
+    for (int32_t i = 0; i < p->sizep; i++)
         if (!attach(p->p[i], next))
             return false;
     return true;
 }
 
-static void report(lua_State* L, int status) {
+static void report(lua_State* L, int32_t status) {
     if (status == LUA_OK)
         return;
     fprintf(stderr, "%s: %s\n", progname, lua_tostring(L, -1));
@@ -64,14 +64,14 @@ static int message(lua_State* L) {
 
 // As lua.c running a script: arg[0] is the script, arg[-1] the program.
 static int run(lua_State* L) {
-    int argc = (int)lua_tointeger(L, 1);
+    int32_t argc = (int32_t)lua_tointeger(L, 1);
     char** argv = (char**)lua_touserdata(L, 2);
     luaL_checkversion(L);
     luaL_openlibs(L);
     lua_gc(L, LUA_GCRESTART);
     lua_gc(L, LUA_GCGEN);
 
-    int status =
+    int32_t status =
         luaL_loadbufferx(L, lm_chunk, lm_chunk_size, progname, "b");
     if (status != LUA_OK) {
         report(L, status);
@@ -90,17 +90,17 @@ static int run(lua_State* L) {
     lua_rawseti(L, -2, -1);
     lua_pushstring(L, script);
     lua_rawseti(L, -2, 0);
-    for (int i = 1; i < argc; i++) {
+    for (int32_t i = 1; i < argc; i++) {
         lua_pushstring(L, argv[i]);
         lua_rawseti(L, -2, i);
     }
     lua_setglobal(L, "arg");
 
-    int base = lua_gettop(L);
+    int32_t base = lua_gettop(L);
     lua_pushcfunction(L, message);
     lua_insert(L, base);
     luaL_checkstack(L, argc, "too many arguments to script");
-    for (int i = 1; i < argc; i++)
+    for (int32_t i = 1; i < argc; i++)
         lua_pushstring(L, argv[i]);
     status = lua_pcall(L, argc - 1, LUA_MULTRET, base);
     report(L, status);
@@ -119,8 +119,8 @@ int main(int argc, char** argv) {
     lua_pushcfunction(L, run);
     lua_pushinteger(L, argc);
     lua_pushlightuserdata(L, argv);
-    int status = lua_pcall(L, 2, 1, 0);
-    int result = lua_toboolean(L, -1);
+    int32_t status = lua_pcall(L, 2, 1, 0);
+    int32_t result = lua_toboolean(L, -1);
     report(L, status);
     lua_close(L);
     return result && status == LUA_OK ? 0 : 1;

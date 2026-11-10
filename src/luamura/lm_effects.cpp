@@ -26,33 +26,33 @@ void EffectModel::findCapturedSlots() {
     captured.erase(llvm::unique(captured), captured.end());
 }
 
-bool EffectModel::reads(unsigned slot) const {
+bool EffectModel::reads(FrameSlot slot) const {
     return llvm::any_of(node->inputs,
                         [&](const Operand& op) { return op.slot == slot; });
 }
 
-bool EffectModel::writes(unsigned slot) const {
+bool EffectModel::writes(FrameSlot slot) const {
     return llvm::any_of(node->outputs,
                         [&](const Operand& op) { return op.slot == slot; });
 }
 
-void EffectModel::read(unsigned slot) {
+void EffectModel::read(FrameSlot slot) {
     if (slot < top && !reads(slot))
         node->inputs.push_back({slot});
 }
 
-void EffectModel::write(unsigned slot) {
+void EffectModel::write(FrameSlot slot) {
     if (slot < top && !writes(slot))
         ir.addOutput(*node, slot);
 }
 
-void EffectModel::readRange(unsigned from, unsigned to) {
-    for (unsigned slot = from; slot < std::min(to, top); ++slot)
+void EffectModel::readRange(FrameSlot from, FrameSlot to) {
+    for (FrameSlot slot = from; slot < std::min(to, top); ++slot)
         read(slot);
 }
 
-void EffectModel::writeRange(unsigned from, unsigned to) {
-    for (unsigned slot = from; slot < std::min(to, top); ++slot)
+void EffectModel::writeRange(FrameSlot from, FrameSlot to) {
+    for (FrameSlot slot = from; slot < std::min(to, top); ++slot)
         write(slot);
 }
 
@@ -60,14 +60,14 @@ void EffectModel::writeRange(unsigned from, unsigned to) {
 // code, which can reach captured slots.
 void EffectModel::runsLua() {
     node->effects = Node::Effects::Runtime;
-    for (unsigned slot : captured) {
+    for (FrameSlot slot : captured) {
         read(slot);
         write(slot);
     }
 }
 
 // A count of zero means the values run to the top of the stack.
-unsigned EffectModel::upTo(unsigned count, unsigned end) const {
+FrameSlot EffectModel::upTo(uint32_t count, FrameSlot end) const {
     return count == 0 ? top : end;
 }
 
@@ -75,9 +75,9 @@ void EffectModel::model(Node& node) {
     this->node = &node;
     Instruction i = node.bytecode;
     OpCode op = GET_OPCODE(i);
-    unsigned a = GETARG_A(i);
-    unsigned b = GETARG_B(i);
-    unsigned c = GETARG_C(i);
+    FrameSlot a = GETARG_A(i);
+    uint32_t b = GETARG_B(i);
+    uint32_t c = GETARG_C(i);
 
     if (op >= OP_ADDI && op <= OP_SHR) {
         read(b);

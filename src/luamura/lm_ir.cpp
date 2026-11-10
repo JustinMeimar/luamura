@@ -143,14 +143,14 @@ Node& LmIR::addNode(Block& block, Node::Kind kind, PC pc) {
     return node;
 }
 
-void LmIR::addOutput(Node& node, unsigned slot) {
+void LmIR::addOutput(Node& node, FrameSlot slot) {
     node.outputs.push_back({slot, static_cast<ValueID>(values.size())});
     values.push_back({node.id, slot});
 }
 
 void LmIR::buildNodes() {
     Node& entry = addNode(getEntryBlock(), Node::Kind::FrameRead);
-    for (unsigned slot = 0; slot < proto.maxstacksize; ++slot)
+    for (FrameSlot slot = 0; slot < proto.maxstacksize; ++slot)
         addOutput(entry, slot);
     EffectModel effects(*this);
     for (auto& block : llvm::drop_begin(blocks))
@@ -162,7 +162,7 @@ void LmIR::buildNodes() {
 }
 
 void LmIR::insertPhis(DominatorTree& dominators) {
-    for (unsigned slot = 0; slot < proto.maxstacksize; ++slot) {
+    for (FrameSlot slot = 0; slot < proto.maxstacksize; ++slot) {
         llvm::SmallPtrSet<Block*, 32> definitions, live;
         std::vector<Block*> work;
         for (auto& block : blocks) {
