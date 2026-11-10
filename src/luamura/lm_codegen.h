@@ -1,7 +1,8 @@
 #ifndef LM_CODEGEN_H
 #define LM_CODEGEN_H
 
-#include "lm_cfg.h"
+#include "lm_ir.h"
+#include "lm_pass.h"
 #include "lm_lua.h"
 
 #include <llvm/IR/IRBuilder.h>
@@ -56,50 +57,31 @@ protected:
     llvm::FunctionCallee lm_compiled;
 };
 
-// The Futamura projection of a block: luaV_execute specialized to the
-// block's instructions. Each instruction calls lvm.c's function for it
-// with the instruction as a constant, and LLVM inlines the call. What
-// remains is the interpreter's work for that instruction alone, without
-// fetching, decoding or dispatch.
-class BlockCompiler : BaselineCompiler {
-public:
-    BlockCompiler(const BaselineCompiler& compiler, const Proto& proto,
-                  const Frame& frame);
-
-    // Returns what the block's last instruction returned: the next call
-    // for luaV_execute to run, if any.
-    llvm::Value* compile(const CFG::Block& block);
-
-private:
-    llvm::Value* projectOpHandler(PC pc);
-
-    const Proto& proto;
-    Frame frame;
-};
-
 // Compiles a Lua function to a native function whose control flow
-// mirrors its CFG: an LLVM block for each of the CFG's blocks, ending
+// mirrors its IR: an LLVM block for each bytecode block, ending
 // where the interpreter would continue.
 class FunctionCompiler : BaselineCompiler {
 public:
-    FunctionCompiler(const BaselineCompiler& compiler, const Proto& proto);
+    FunctionCompiler(const BaselineCompiler& compiler, const LmIR& ir);
 
     llvm::Function* compile(const llvm::Twine& name);
 
 private:
+    llvm::Value* lowerBlock(const Block& block);
+    llvm::Value* projectOpHandler(const Node& node);
     void enter();
-    void terminate(const CFG::Block& block, llvm::Value* next);
-    void toSuccessors(const CFG::Block& block);
+    void terminate(const Block& block, llvm::Value* next);
+    void toSuccessors(const Block& block);
     void afterCall(llvm::Value* next, llvm::BasicBlock* successor);
     void tailCall(llvm::Value* next);
     void returnIf(llvm::Value* condition, llvm::Value* value);
     llvm::BasicBlock* createBlock(const llvm::Twine& name = "");
 
     const Proto& proto;
-    CFG cfg;
+    const LmIR& ir;
     llvm::Function* function = nullptr;
     Frame frame;
-    // the LLVM block for each of cfg's blocks
+    // Indexed by IR block ID; the entry is the resume dispatch.
     std::vector<llvm::BasicBlock*> llvm_blocks;
     // returns to luaV_execute, to interpret from the saved pc
     llvm::BasicBlock* interpret = nullptr;
@@ -116,6 +98,7 @@ private:
     void compileFunction(const Proto& proto);
     void define(const char* name, llvm::Constant* value);
 
+    PassManager passes;
     std::vector<llvm::Constant*> functions;
 };
 

@@ -1,4 +1,4 @@
-#include "luamura.h"
+#include "lstate.h"
 
 #include "lauxlib.h"
 #include "ldebug.h"
@@ -6,7 +6,14 @@
 #include "lualib.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+
+// What compiled programs define.
+extern const char lm_chunk[];
+extern const size_t lm_chunk_size;
+extern const lua_AotFunction lm_functions[];
+extern const uint32_t lm_nfunctions;
 
 static const char* progname = "luamura";
 

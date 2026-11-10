@@ -10,19 +10,49 @@
 #include <iostream>
 #include <string>
 
+/*
+ * [LMDOC] Luamura
+ *
+ * Luamura is an AOT Baseline compiler for lua. The primary goal is to
+ * eliminate the interpreters dispatch overhead. Luamura achieves this by
+ * applying the first Futamura projection, deriving a compiled binary by
+ * specializing the interpreter to a fixed bytecode.
+ *
+ * A set of native, dispatch erased functions are emited into a binary which
+ * links liblua. Native functions can, and often do, bail out or dispatch to
+ * VM routines for garbage collection, debug handling, co-routine scheduling,
+ * etc. This is what allows Luamura to be a compliant implementation with
+ * relatively little effort. It is also limits the Baseline performance. All
+ * dispatches into the VM are opaque, and make analysis imprecise. Moreover,
+ * any VM call can mutate the stack, PC, etc, which forces native-compiled
+ * code to be defensive around each call.
+ *
+ * To natively compile Lua, each function is a module is lexed, parsed and
+ * lowered into bytecode. A control-flow-graph (CFG) is constructed from the
+ * instructions in each function. The Baseline compiler receives the CFG and
+ * iterates over its blocks. For each bytecode instruction within a block, the
+ * IR builder emits a call to the respective op-handler function, marked with
+ * the always-inline attribute. A straight-line sequence of Lua bytecode then
+ * compiles down into each op-handler stitched together, with no dispatch
+ * overhead.
+ *
+ * In order to make each op-handler visible, the interpreter is modified to
+ * expose each op-handler as a function. This slows down the interpreter by
+ * trading the computed-goto (threaded) dispatch for a slow, function call
+ * between each operation.
+ *
+ *
+ */
+
 namespace luamura {
 
-static int append(lua_State*, const void* data, size_t size, void* out) {
-    static_cast<std::string*>(out)->append(static_cast<const char*>(data),
-                                           size);
-    return 0;
-}
+#define LUAMURA_PRECOMP alignas(4) static const unsigned char
 
-alignas(4) static const unsigned char lvm_bitcode[] = {
+LUAMURA_PRECOMP lvm_bitcode[] = {
 #embed "lvm.bc"
 };
 
-alignas(4) static const unsigned char ltable_bitcode[] = {
+LUAMURA_PRECOMP ltable_bitcode[] = {
 #embed "ltable.bc"
 };
 
@@ -90,7 +120,14 @@ int main(int argc, char* argv[]) {
     }
     const Proto* main = clLvalue(s2v(L->top.p - 1))->p;
     std::string chunk;
-    lua_dump(L, luamura::append, &chunk, 0);
+    lua_dump(
+        L,
+        [](lua_State*, const void* data, size_t size, void* out) {
+            static_cast<std::string*>(out)->append(
+                static_cast<const char*>(data), size);
+            return 0;
+        },
+        &chunk, 0);
 
     llvm::LLVMContext context;
     auto module = luamura::compileModule(context, *main, chunk);

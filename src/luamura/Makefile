@@ -30,7 +30,7 @@ BITCODE= $(OBJ)/lua/lvm.bc $(OBJ)/lua/ltable.bc
 LUA_T= $(BUILD)/lua
 LUAMURA_T= $(BUILD)/luamura
 LUAMURA_O= $(addprefix $(OBJ)/luamura/, \
-	lm_c.o lm_cfg.o lm_codegen.o)
+	luamura.o lm_ir.o lm_codegen.o)
 RT_O= $(BUILD)/lm_rt.o
 
 TESTS= ../../tests
@@ -66,7 +66,7 @@ $(LUA_T): $(OBJ)/lua/lua.o $(LUA_A)
 $(LUAMURA_T): $(LUAMURA_O) $(LUA_A)
 	$(CXX) -o $@ $^ $(LIBS)
 
-$(OBJ)/luamura/%.o: %.cpp | $(OBJ)/luamura
+$(OBJ)/luamura/%.o: %.cpp $(wildcard *.h ../*.h) | $(OBJ)/luamura
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(RT_O): lm_rt.c | $(OBJ)/luamura
@@ -95,15 +95,7 @@ clean:
 
 .PHONY: all check check-internal check-lua-test clean
 
-$(OBJ)/luamura/lm_c.o: lm_c.cpp lm_codegen.h lm_lua.h ../lauxlib.h \
- ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h \
- ../lstate.h ../ltm.h ../lzio.h ../lmem.h $(BITCODE)
-$(OBJ)/luamura/lm_cfg.o: lm_cfg.cpp lm_cfg.h lm_lua.h ../lauxlib.h \
- ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h ../lopcodes.h \
- ../lstate.h ../ltm.h ../lzio.h ../lmem.h
-$(OBJ)/luamura/lm_codegen.o: lm_codegen.cpp lm_codegen.h lm_lua.h \
- ../lauxlib.h ../luaconf.h ../lua.h ../lfunc.h ../lobject.h ../llimits.h \
- ../lopcodes.h ../lstate.h ../ltm.h ../lzio.h ../lmem.h lm_cfg.h ../lopnames.h
-$(RT_O): luamura.h ../lstate.h ../lua.h ../luaconf.h ../lobject.h \
+$(OBJ)/luamura/luamura.o: $(BITCODE)
+$(RT_O): ../lstate.h ../lua.h ../luaconf.h ../lobject.h \
  ../llimits.h ../ltm.h ../lzio.h ../lmem.h ../lauxlib.h ../ldebug.h \
  ../lfunc.h ../lualib.h

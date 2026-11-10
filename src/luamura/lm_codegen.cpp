@@ -5,6 +5,7 @@
 #include <llvm/IR/GlobalVariable.h>
 
 #include <string>
+#include <cstdlib>
 
 extern "C" {
 #include "lopnames.h"
@@ -27,19 +28,16 @@ BaselineCompiler::BaselineCompiler(llvm::Module& module,
       lm_compiled(module.getOrInsertFunction("lm_compiled", ptr_ty, ptr_ty,
                                              ptr_ty)) {}
 
-BlockCompiler::BlockCompiler(const BaselineCompiler& compiler,
-                             const Proto& proto, const Frame& frame)
-    : BaselineCompiler(compiler), proto(proto), frame(frame) {}
-
-llvm::Value* BlockCompiler::compile(const CFG::Block& block) {
+llvm::Value* FunctionCompiler::lowerBlock(const Block& block) {
     llvm::Value* next = nullptr;
-    for (PC pc = block.start; pc < block.end; pc++)
-        next = projectOpHandler(pc);
+    for (uint32_t id : block.instructions)
+        next = projectOpHandler(ir.nodes[id]);
     return next;
 }
 
-llvm::Value* BlockCompiler::projectOpHandler(PC pc) {
-    Instruction i = proto.code[pc];
+llvm::Value* FunctionCompiler::projectOpHandler(const Node& node) {
+    PC pc = node.pc;
+    Instruction i = node.bytecode;
     // the jump after i, if i is a test
     Instruction ni = pc + 1 < proto.sizecode ? proto.code[pc + 1] : 0;
     // the interpreter's pc after fetching i
@@ -57,8 +55,8 @@ llvm::Value* BlockCompiler::projectOpHandler(PC pc) {
 }
 
 FunctionCompiler::FunctionCompiler(const BaselineCompiler& compiler,
-                                   const Proto& proto)
-    : BaselineCompiler(compiler), proto(proto), cfg(proto) {}
+                                   const LmIR& ir)
+    : BaselineCompiler(compiler), proto(ir.proto), ir(ir) {}
 
 llvm::BasicBlock* FunctionCompiler::createBlock(const llvm::Twine& name) {
     return llvm::BasicBlock::Create(context, name, function);
@@ -73,19 +71,19 @@ llvm::Function* FunctionCompiler::compile(const llvm::Twine& name) {
     auto* entry = createBlock();
     interpret = createBlock();
     // named for reading the IR against the bytecode
-    for (const CFG::Block& block : cfg.blocks)
-        llvm_blocks.push_back(createBlock("pc" + llvm::Twine(block.start)));
+    llvm_blocks.push_back(entry);
+    for (const auto& block : llvm::drop_begin(ir.blocks))
+        llvm_blocks.push_back(
+            createBlock("pc" + llvm::Twine(block->start)));
 
     builder.SetInsertPoint(interpret);
     builder.CreateRet(frame.ci);
     builder.SetInsertPoint(entry);
     enter();
 
-    BlockCompiler block_compiler(*this, proto, frame);
-    for (auto [block, llvm_block] :
-         llvm::zip_equal(cfg.blocks, llvm_blocks)) {
-        builder.SetInsertPoint(llvm_block);
-        terminate(block, block_compiler.compile(block));
+    for (const auto& block : llvm::drop_begin(ir.blocks)) {
+        builder.SetInsertPoint(llvm_blocks[block->id]);
+        terminate(*block, lowerBlock(*block));
     }
     return function;
 }
@@ -96,18 +94,17 @@ void FunctionCompiler::enter() {
     frame.code = builder.CreateCall(lm_code, {frame.ci});
     auto* saved = builder.CreateCall(lm_resume, {frame.ci});
     auto* resume = builder.CreateSwitch(saved, interpret);
-    for (CFG::BlockIndex e : cfg.entries)
-        resume->addCase(builder.getInt32(cfg.blocks[e].start),
-                        llvm_blocks[e]);
+    for (const Block* target : ir.blocks.front()->successors)
+        resume->addCase(builder.getInt32(target->start),
+                        llvm_blocks[target->id]);
 }
 
 // Continues where the interpreter would after the block's last
 // instruction, which returned next.
-void FunctionCompiler::terminate(const CFG::Block& block,
-                                 llvm::Value* next) {
-    switch (GET_OPCODE(proto.code[block.last()])) {
+void FunctionCompiler::terminate(const Block& block, llvm::Value* next) {
+    switch (GET_OPCODE(ir.nodes[block.instructions.back()].bytecode)) {
     case OP_CALL:
-        return afterCall(next, llvm_blocks[block.successors.front()]);
+        return afterCall(next, llvm_blocks[block.successors.front()->id]);
     case OP_TAILCALL:
         return tailCall(next);
     case OP_RETURN:
@@ -121,17 +118,19 @@ void FunctionCompiler::terminate(const CFG::Block& block,
 }
 
 // The instruction left in pc which successor to continue at.
-void FunctionCompiler::toSuccessors(const CFG::Block& block) {
-    const std::vector<CFG::BlockIndex>& targets = block.successors;
+void FunctionCompiler::toSuccessors(const Block& block) {
+    const std::vector<Block*>& targets = block.successors;
     if (targets.size() == 1) {
-        builder.CreateBr(llvm_blocks[targets.front()]);
+        builder.CreateBr(llvm_blocks[targets.front()->id]);
         return;
     }
     auto* moved = builder.CreatePtrDiff(
         instruction_ty, builder.CreateLoad(ptr_ty, frame.pc), frame.code);
-    auto* to = builder.CreateSwitch(moved, llvm_blocks[targets.front()]);
-    for (CFG::BlockIndex t : llvm::drop_begin(targets))
-        to->addCase(builder.getInt64(cfg.blocks[t].start), llvm_blocks[t]);
+    auto* to =
+        builder.CreateSwitch(moved, llvm_blocks[targets.front()->id]);
+    for (const Block* target : llvm::drop_begin(targets))
+        to->addCase(builder.getInt64(target->start),
+                    llvm_blocks[target->id]);
 }
 
 // A Lua callee is left for luaV_execute to run. A C function returned
@@ -191,9 +190,12 @@ void ModuleCompiler::define(const char* name, llvm::Constant* value) {
 
 // The runtime attaches the functions to the chunk's Protos in preorder.
 void ModuleCompiler::compileFunction(const Proto& proto) {
-    functions.push_back(
-        FunctionCompiler(*this, proto)
-            .compile("lm_function_" + llvm::Twine(functions.size())));
+    LmIR ir(proto);
+    passes.run(ir);
+    if (std::getenv("LUAMURA_DUMP_IR"))
+        ir.print(llvm::errs());
+    functions.push_back(FunctionCompiler(*this, ir).compile(
+        "lm_function_" + llvm::Twine(functions.size())));
     for (const Proto* nested : llvm::ArrayRef(proto.p, proto.sizep))
         compileFunction(*nested);
 }
