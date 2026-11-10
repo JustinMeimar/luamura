@@ -120,18 +120,19 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     const Proto* main = clLvalue(s2v(L->top.p - 1))->p;
-    std::string chunk;
+    luamura::GuestBytecode bytecode;
     lua_dump(
         L,
         [](lua_State*, const void* data, size_t size, void* out) {
-            static_cast<std::string*>(out)->append(
-                static_cast<const char*>(data), size);
+            auto* bytes = static_cast<const uint8_t*>(data);
+            auto* bytecode = static_cast<luamura::GuestBytecode*>(out);
+            bytecode->insert(bytecode->end(), bytes, bytes + size);
             return 0;
         },
-        &chunk, 0);
+        &bytecode, 0);
 
     llvm::LLVMContext context;
-    auto module = luamura::compileModule(context, *main, chunk);
+    auto module = luamura::compileModule(context, *main, bytecode);
     lua_close(L);
     if (llvm::verifyModule(*module, &llvm::errs()) ||
         !luamura::linkLua(*module))

@@ -2,7 +2,7 @@
 #define LM_CODEGEN_H
 
 #include "lm_ir.h"
-#include "lm_pass.h"
+#include "lm_lower.h"
 #include "lm_lua.h"
 
 #include <llvm/IR/IRBuilder.h>
@@ -15,12 +15,10 @@
 
 namespace luamura {
 
-// The baseline compiler. Each function of the chunk becomes a native
-// function that runs its instructions on the Lua stack, with lvm.c's
-// function for each instruction.
+// Compiles a chunk's functions with the baseline backend.
 std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
                                             const Proto& main,
-                                            const std::string& chunk);
+                                            const GuestBytecode& bytecode);
 
 // What luaV_execute keeps while running a function.
 struct Frame {
@@ -31,18 +29,47 @@ struct Frame {
     llvm::Value* pc = nullptr;
 };
 
-// What every compiler shares: the module, the builder inserting into
-// it, and the LLVM types compiled code uses.
-class BaselineCompiler {
+// The baseline backend. Each function becomes a native function whose
+// control flow mirrors its IR, running each bytecode with lvm.c's
+// function for it.
+class BaselineLowerer : public LmIRLowerer {
 public:
-    BaselineCompiler(llvm::Module& module, llvm::IRBuilder<>& builder);
+    BaselineLowerer(llvm::Module& module, const GuestBytecode& bytecode);
 
-protected:
+    using LmIRLowerer::lower;
+    // Also defines what the runtime loads.
+    void lower(const LmModule& module) override;
+    void lower(const LmIR& ir) override;
+    void lower(const Block& block) override;
+
+private:
+    void lowerFrameRead(const Node& node) override;
+    void lowerPhi(const Node& node) override;
+    void lowerBytecode(const Node& node) override;
+    void lowerGuard(const Node& node) override;
+    void lowerTerminator(const Block& block) override;
+
+    bool isIntegerAdd(const Node& node) const;
+    void lowerIntegerAdd(const Node& node);
+    llvm::Value* projectOpHandler(const Node& node);
+    llvm::Value* slotAddress(Slot slot, size_t field);
+    llvm::Value* loadInteger(Slot slot);
+    void enter();
+    void resume(const Block& block);
+    void toSuccessors(const Block& block);
+    void afterCall(llvm::BasicBlock* successor);
+    void tailCall();
+    void returnIf(llvm::Value* condition, llvm::Value* value);
+    llvm::BasicBlock* createBlock(const llvm::Twine& name = "");
+    void define(const char* name, llvm::Constant* value);
+
     llvm::Module& module;
     llvm::LLVMContext& context;
-    llvm::IRBuilder<>& builder;
+    llvm::IRBuilder<> builder;
+    const GuestBytecode& bytecode;
 
     llvm::PointerType* ptr_ty;
+    llvm::IntegerType* i8_ty;
     llvm::IntegerType* i32_ty;
     llvm::IntegerType* i64_ty;
     llvm::IntegerType* instruction_ty;
@@ -55,52 +82,21 @@ protected:
     llvm::FunctionCallee lm_code;
     llvm::FunctionCallee lm_resume;
     llvm::FunctionCallee lm_compiled;
-};
 
-// Compiles a Lua function to a native function whose control flow
-// mirrors its IR: an LLVM block for each bytecode block, ending
-// where the interpreter would continue.
-class FunctionCompiler : BaselineCompiler {
-public:
-    FunctionCompiler(const BaselineCompiler& compiler, const LmIR& ir);
+    std::vector<llvm::Constant*> functions;
 
-    llvm::Function* compile(const llvm::Twine& name);
-
-private:
-    llvm::Value* lowerBlock(const Block& block);
-    llvm::Value* projectOpHandler(const Node& node);
-    void enter();
-    void resume(const Block& block);
-    void terminate(const Block& block, llvm::Value* next);
-    void toSuccessors(const Block& block);
-    void afterCall(llvm::Value* next, llvm::BasicBlock* successor);
-    void tailCall(llvm::Value* next);
-    void returnIf(llvm::Value* condition, llvm::Value* value);
-    llvm::BasicBlock* createBlock(const llvm::Twine& name = "");
-
-    const Proto& proto;
-    const LmIR& ir;
+    // the function being lowered
+    const Proto* proto = nullptr;
     llvm::Function* function = nullptr;
     Frame frame;
     // Indexed by IR block ID; the entry is the resume dispatch.
     std::vector<llvm::BasicBlock*> llvm_blocks;
     // returns to luaV_execute, to interpret from the saved pc
     llvm::BasicBlock* interpret = nullptr;
-};
 
-// Compiles a chunk's functions, and defines what the runtime loads.
-class ModuleCompiler : BaselineCompiler {
-public:
-    using BaselineCompiler::BaselineCompiler;
-
-    void compile(const Proto& main, const std::string& chunk);
-
-private:
-    void compileFunction(const Proto& proto);
-    void define(const char* name, llvm::Constant* value);
-
-    PassManager passes;
-    std::vector<llvm::Constant*> functions;
+    // the block being lowered, and what its last node returned
+    const Block* block = nullptr;
+    llvm::Value* next = nullptr;
 };
 
 } // namespace luamura

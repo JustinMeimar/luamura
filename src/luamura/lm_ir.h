@@ -3,6 +3,7 @@
 
 #include "lm_lua.h"
 
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/GraphTraits.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/ADT/iterator.h>
@@ -18,6 +19,8 @@ namespace luamura {
 using PC = int32_t;
 using ValueID = uint32_t;
 using Slot = uint32_t;
+// a Lua type variant tag, such as LUA_VNUMINT
+using TypeTag = uint8_t;
 constexpr ValueID no_value = UINT32_MAX;
 class LmIR;
 struct Block;
@@ -33,7 +36,14 @@ struct PhiInput {
 };
 
 struct Node {
-    enum class Kind { FrameRead, Phi, Bytecode };
+    enum class Kind {
+        FrameRead,
+        Phi,
+        Bytecode,
+        // tests that its inputs have the types its first successor
+        // assumes, and ends its block
+        Guard,
+    };
     enum class Effects { Frame, Runtime };
 
     uint32_t id;
@@ -62,6 +72,8 @@ struct Block {
         Call,
         TailCall,
         Return,
+        // to the first successor if the guard holds, else the second
+        Guard,
     };
 
     LmIR* parent;
@@ -69,6 +81,9 @@ struct Block {
     // the pc the block starts at, if the interpreter can be there
     PC start = -1;
     Terminator terminator = Terminator::Branch;
+    // the types the block assumes its values have, which the guard
+    // before it tests
+    llvm::DenseMap<ValueID, TypeTag> types;
     std::vector<Block*> predecessors;
     std::vector<Block*> successors;
     std::vector<uint32_t> phis;
@@ -92,6 +107,11 @@ public:
     size_t size() const { return blocks.size(); }
     Block& getEntryBlock() { return *blocks.front(); }
 
+    Block& addBlock();
+    void addEdge(Block& from, Block& to);
+    // Moves the instructions from index on, with the block's terminator
+    // and successors, to a new block. The caller ends the block.
+    Block& splitBlock(Block& block, size_t index);
     Node& addNode(Block& block, Node::Kind kind, PC pc = -1);
     void addOutput(Node& node, Slot slot);
     void print(llvm::raw_ostream& out) const;
@@ -110,6 +130,18 @@ private:
     using DominatorTree = llvm::DominatorTreeBase<Block, false>;
     void insertPhis(DominatorTree& dominators);
     void renameValues(DominatorTree& dominators);
+};
+
+// A chunk's functions, in the preorder the runtime attaches them to
+// its Protos.
+class LmModule {
+public:
+    explicit LmModule(const Proto& main);
+
+    std::vector<std::unique_ptr<LmIR>> functions;
+
+private:
+    void addFunction(const Proto& proto);
 };
 
 } // namespace luamura

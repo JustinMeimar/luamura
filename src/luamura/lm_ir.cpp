@@ -104,35 +104,58 @@ std::vector<PC> LmIR::buildBlocks() {
         for (PC target : successorPCs(proto, ends[pc] - 1))
             work.push_back(target);
     }
-    auto add = [&](PC start, Block::Terminator terminator) {
-        auto block = std::make_unique<Block>();
-        block->parent = this;
-        block->id = blocks.size();
-        block->start = start;
-        block->terminator = terminator;
-        blocks.push_back(std::move(block));
-        return blocks.back().get();
-    };
-    Block* entry = add(-1, Block::Terminator::Resume);
+    Block& entry = addBlock();
+    entry.terminator = Block::Terminator::Resume;
     std::vector<Block*> at(proto.sizecode, nullptr);
-    for (PC pc = 0; pc < proto.sizecode; ++pc)
-        if (reached[pc])
-            at[pc] = add(pc, terminatorAt(ends[pc] - 1));
-    auto connect = [](Block* from, Block* to) {
-        if (llvm::is_contained(from->successors, to))
-            return;
-        from->successors.push_back(to);
-        to->predecessors.push_back(from);
-    };
-    connect(entry, at[0]);
+    for (PC pc = 0; pc < proto.sizecode; ++pc) {
+        if (!reached[pc])
+            continue;
+        at[pc] = &addBlock();
+        at[pc]->start = pc;
+        at[pc]->terminator = terminatorAt(ends[pc] - 1);
+    }
+    addEdge(entry, *at[0]);
     for (auto& block : llvm::drop_begin(blocks)) {
         PC last = ends[block->start] - 1;
         for (PC target : successorPCs(proto, last))
-            connect(block.get(), at[target]);
+            addEdge(*block, *at[target]);
         if (isCall(proto, last))
-            connect(entry, block->successors.front());
+            addEdge(entry, *block->successors.front());
     }
     return ends;
+}
+
+Block& LmIR::addBlock() {
+    auto block = std::make_unique<Block>();
+    block->parent = this;
+    block->id = blocks.size();
+    blocks.push_back(std::move(block));
+    return *blocks.back();
+}
+
+void LmIR::addEdge(Block& from, Block& to) {
+    if (llvm::is_contained(from.successors, &to))
+        return;
+    from.successors.push_back(&to);
+    to.predecessors.push_back(&from);
+}
+
+Block& LmIR::splitBlock(Block& block, size_t index) {
+    Block& rest = addBlock();
+    rest.instructions.assign(block.instructions.begin() + index,
+                             block.instructions.end());
+    block.instructions.resize(index);
+    rest.terminator = block.terminator;
+    rest.successors = std::move(block.successors);
+    block.successors.clear();
+    for (Block* next : rest.successors) {
+        llvm::replace(next->predecessors, &block, &rest);
+        for (uint32_t id : next->phis)
+            for (PhiInput& in : nodes[id].incoming)
+                if (in.predecessor == &block)
+                    in.predecessor = &rest;
+    }
+    return rest;
 }
 
 Block::Terminator LmIR::terminatorAt(PC last) const {
@@ -254,6 +277,14 @@ void LmIR::renameValues(DominatorTree& dominators) {
     }
 }
 
+LmModule::LmModule(const Proto& main) { addFunction(main); }
+
+void LmModule::addFunction(const Proto& proto) {
+    functions.push_back(std::make_unique<LmIR>(proto));
+    for (const Proto* nested : llvm::ArrayRef(proto.p, proto.sizep))
+        addFunction(*nested);
+}
+
 void Block::printAsOperand(llvm::raw_ostream& out, bool) const {
     out << "b" << id;
 }
@@ -263,26 +294,36 @@ void LmIR::printBlock(llvm::raw_ostream& out, const Block& block) const {
     if (block.start >= 0)
         out << " (pc " << block.start << ")";
     out << ":\n";
+    for (auto [value, tag] : block.types)
+        out << "  assumes %" << value << " has tag " << int32_t(tag)
+            << "\n";
     auto printNode = [&](uint32_t id) {
         const Node& node = nodes[id];
         out << "  n" << id << " ";
         for (const Operand& op : node.outputs)
             out << "%" << op.value << "[R" << op.slot << "] ";
         out << "= ";
-        if (node.kind == Node::Kind::Phi) {
+        switch (node.kind) {
+        case Node::Kind::Phi:
             out << "phi";
             for (const PhiInput& in : node.incoming)
                 out << " [b" << in.predecessor->id << ": %" << in.value
                     << "]";
-        } else if (node.kind == Node::Kind::FrameRead) {
+            break;
+        case Node::Kind::FrameRead:
             out << "frame_read";
-        } else {
+            break;
+        case Node::Kind::Bytecode:
             out << opnames[GET_OPCODE(node.bytecode)] << " @" << node.pc;
-            for (const Operand& op : node.inputs)
-                out << " %" << op.value << "[R" << op.slot << "]";
-            if (node.effects == Node::Effects::Runtime)
-                out << " [runtime]";
+            break;
+        case Node::Kind::Guard:
+            out << "guard";
+            break;
         }
+        for (const Operand& op : node.inputs)
+            out << " %" << op.value << "[R" << op.slot << "]";
+        if (node.effects == Node::Effects::Runtime)
+            out << " [runtime]";
         out << "\n";
     };
     for (uint32_t id : block.phis)

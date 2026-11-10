@@ -7,6 +7,9 @@
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/GraphWriter.h>
 
+#include <cstdint>
+#include <vector>
+
 extern "C" {
 #include "lauxlib.h"
 #include "lfunc.h"
@@ -15,6 +18,14 @@ extern "C" {
 #include "lstate.h"
 #include "lua.h"
 }
+
+namespace luamura {
+
+// The guest program's bytecode, as lua_dump writes it, which compiled
+// programs embed for the runtime to load.
+using GuestBytecode = std::vector<uint8_t>;
+
+} // namespace luamura
 
 #define LUAMURA_SWITCH(i) switch (GET_OPCODE(i))
 #define LUAMURA_CASE(op) case OP_##op

@@ -12,9 +12,10 @@ public:
     using Pass = void (*)(LmIR&);
 
     void add(Pass pass) { passes.push_back(pass); }
-    void run(LmIR& ir) const {
-        for (Pass pass : passes)
-            pass(ir);
+    void run(LmModule& module) const {
+        for (auto& ir : module.functions)
+            for (Pass pass : passes)
+                pass(*ir);
     }
 
 private:
