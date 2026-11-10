@@ -86,150 +86,150 @@ void EffectModel::model(Node& node) {
         write(a);
         return;
     }
-    switch (op) {
-    case OP_MOVE:
-    case OP_NOT:
+    LUAMURA_SWITCH(i) {
+    LUAMURA_CASE(MOVE):
+    LUAMURA_CASE(NOT):
         read(b);
         write(a);
         break;
-    case OP_LOADI:
-    case OP_LOADF:
-    case OP_LOADK:
-    case OP_LOADKX:
-    case OP_LOADFALSE:
-    case OP_LOADTRUE:
-    case OP_LFALSESKIP:
-    case OP_GETUPVAL:
+    LUAMURA_CASE(LOADI):
+    LUAMURA_CASE(LOADF):
+    LUAMURA_CASE(LOADK):
+    LUAMURA_CASE(LOADKX):
+    LUAMURA_CASE(LOADFALSE):
+    LUAMURA_CASE(LOADTRUE):
+    LUAMURA_CASE(LFALSESKIP):
+    LUAMURA_CASE(GETUPVAL):
         write(a);
         break;
-    case OP_LOADNIL:
+    LUAMURA_CASE(LOADNIL):
         writeRange(a, a + b + 1);
         break;
-    case OP_SETUPVAL:
-    case OP_TBC:
-    case OP_EQK:
-    case OP_EQI:
-    case OP_TEST:
-    case OP_RETURN1:
-    case OP_ERRNNIL:
+    LUAMURA_CASE(SETUPVAL):
+    LUAMURA_CASE(TBC):
+    LUAMURA_CASE(EQK):
+    LUAMURA_CASE(EQI):
+    LUAMURA_CASE(TEST):
+    LUAMURA_CASE(RETURN1):
+    LUAMURA_CASE(ERRNNIL):
         read(a);
         break;
-    case OP_GETVARG:
+    LUAMURA_CASE(GETVARG):
         read(b);
         read(c);
         write(a);
         break;
-    case OP_GETTABUP:
-    case OP_NEWTABLE:
-    case OP_CLOSURE:
+    LUAMURA_CASE(GETTABUP):
+    LUAMURA_CASE(NEWTABLE):
+    LUAMURA_CASE(CLOSURE):
         write(a);
         runsLua();
         break;
-    case OP_GETTABLE:
+    LUAMURA_CASE(GETTABLE):
         read(c);
         [[fallthrough]];
-    case OP_GETI:
-    case OP_GETFIELD:
-    case OP_UNM:
-    case OP_BNOT:
-    case OP_LEN:
+    LUAMURA_CASE(GETI):
+    LUAMURA_CASE(GETFIELD):
+    LUAMURA_CASE(UNM):
+    LUAMURA_CASE(BNOT):
+    LUAMURA_CASE(LEN):
         read(b);
         write(a);
         runsLua();
         break;
-    case OP_SETTABLE:
+    LUAMURA_CASE(SETTABLE):
         read(b);
         [[fallthrough]];
-    case OP_SETI:
-    case OP_SETFIELD:
+    LUAMURA_CASE(SETI):
+    LUAMURA_CASE(SETFIELD):
         read(a);
         [[fallthrough]];
-    case OP_SETTABUP:
+    LUAMURA_CASE(SETTABUP):
         if (!TESTARG_k(i))
             read(c);
         runsLua();
         break;
-    case OP_SELF:
+    LUAMURA_CASE(SELF):
         read(b);
         write(a);
         write(a + 1);
         runsLua();
         break;
-    case OP_MMBIN:
+    LUAMURA_CASE(MMBIN):
         read(b);
         [[fallthrough]];
-    case OP_MMBINI:
-    case OP_MMBINK:
+    LUAMURA_CASE(MMBINI):
+    LUAMURA_CASE(MMBINK):
         // the result goes to the arithmetic instruction's register
         read(a);
         write(GETARG_A(ir.proto.code[node.pc - 1]));
         runsLua();
         break;
-    case OP_CONCAT:
+    LUAMURA_CASE(CONCAT):
         readRange(a, a + b);
         writeRange(a, a + b);
         runsLua();
         break;
-    case OP_CLOSE:
+    LUAMURA_CASE(CLOSE):
         readRange(a, top);
         runsLua();
         break;
-    case OP_JMP:
-    case OP_RETURN0:
-    case OP_EXTRAARG:
+    LUAMURA_CASE(JMP):
+    LUAMURA_CASE(RETURN0):
+    LUAMURA_CASE(EXTRAARG):
         break;
-    case OP_EQ:
-    case OP_LT:
-    case OP_LE:
+    LUAMURA_CASE(EQ):
+    LUAMURA_CASE(LT):
+    LUAMURA_CASE(LE):
         read(b);
         [[fallthrough]];
-    case OP_LTI:
-    case OP_LEI:
-    case OP_GTI:
-    case OP_GEI:
+    LUAMURA_CASE(LTI):
+    LUAMURA_CASE(LEI):
+    LUAMURA_CASE(GTI):
+    LUAMURA_CASE(GEI):
         read(a);
         runsLua();
         break;
-    case OP_TESTSET:
+    LUAMURA_CASE(TESTSET):
         read(b);
         write(a);
         break;
-    case OP_CALL:
+    LUAMURA_CASE(CALL):
         // the callee's frame starts above the function
         readRange(a, upTo(b, a + b));
         writeRange(a, top);
         runsLua();
         break;
-    case OP_TAILCALL:
+    LUAMURA_CASE(TAILCALL):
         readRange(a, upTo(b, a + b));
         runsLua();
         break;
-    case OP_RETURN:
+    LUAMURA_CASE(RETURN):
         // closing to-be-closed variables reads them, wherever they are
         readRange(TESTARG_k(i) ? 0 : a, upTo(b, a + b - 1));
         runsLua();
         break;
-    case OP_FORPREP:
-    case OP_FORLOOP:
+    LUAMURA_CASE(FORPREP):
+    LUAMURA_CASE(FORLOOP):
         readRange(a, a + 3);
         writeRange(a, a + 3);
         break;
-    case OP_TFORPREP:
+    LUAMURA_CASE(TFORPREP):
         readRange(a + 2, a + 4);
         writeRange(a + 2, a + 4);
         break;
-    case OP_TFORCALL:
+    LUAMURA_CASE(TFORCALL):
         readRange(a, a + 4);
         writeRange(a + 3, top);
         runsLua();
         break;
-    case OP_TFORLOOP:
+    LUAMURA_CASE(TFORLOOP):
         read(a + 3);
         break;
-    case OP_SETLIST:
+    LUAMURA_CASE(SETLIST):
         readRange(a, upTo(GETARG_vB(i), a + 1 + GETARG_vB(i)));
         break;
-    case OP_VARARG:
+    LUAMURA_CASE(VARARG):
         if (TESTARG_k(i))
             read(b);
         writeRange(a, upTo(c, a + c - 1));

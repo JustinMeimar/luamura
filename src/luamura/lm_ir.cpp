@@ -33,28 +33,28 @@ static std::vector<PC> successorPCs(const Proto& proto, PC pc) {
             return {skip};
         return {jump, skip};
     }
-    switch (op) {
-    case OP_JMP:
+    LUAMURA_SWITCH(i) {
+    LUAMURA_CASE(JMP):
         return {next + GETARG_sJ(i)};
-    case OP_RETURN:
-    case OP_RETURN0:
-    case OP_RETURN1:
-    case OP_TAILCALL:
-    case OP_EXTRAARG:
+    LUAMURA_CASE(RETURN):
+    LUAMURA_CASE(RETURN0):
+    LUAMURA_CASE(RETURN1):
+    LUAMURA_CASE(TAILCALL):
+    LUAMURA_CASE(EXTRAARG):
         return {};
-    case OP_FORLOOP:
-    case OP_TFORLOOP:
+    LUAMURA_CASE(FORLOOP):
+    LUAMURA_CASE(TFORLOOP):
         return {next - GETARG_Bx(i), next};
-    case OP_FORPREP:
+    LUAMURA_CASE(FORPREP):
         return {next, next + GETARG_Bx(i) + 1};
-    case OP_TFORPREP:
+    LUAMURA_CASE(TFORPREP):
         return {next + GETARG_Bx(i)};
     // these skip the instruction after them
-    case OP_LOADKX:
-    case OP_NEWTABLE:
-    case OP_LFALSESKIP:
+    LUAMURA_CASE(LOADKX):
+    LUAMURA_CASE(NEWTABLE):
+    LUAMURA_CASE(LFALSESKIP):
         return {next + 1};
-    case OP_SETLIST:
+    LUAMURA_CASE(SETLIST):
         return {TESTARG_k(i) ? next + 1 : next};
     default:
         // arithmetic skips the metamethod call after it, unless its

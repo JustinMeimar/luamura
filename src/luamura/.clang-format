@@ -10,3 +10,6 @@ PointerAlignment: Left
 ReferenceAlignment: Left
 DerivePointerAlignment: false
 SortIncludes: Never
+Macros:
+  - 'LUAMURA_SWITCH(i)=switch (i)'
+  - 'LUAMURA_CASE(op)=case op'

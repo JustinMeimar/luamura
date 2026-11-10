@@ -16,4 +16,7 @@ extern "C" {
 #include "lua.h"
 }
 
+#define LUAMURA_SWITCH(i) switch (GET_OPCODE(i))
+#define LUAMURA_CASE(op) case OP_##op
+
 #endif // LM_LUA_H

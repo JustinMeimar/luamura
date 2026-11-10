@@ -102,14 +102,14 @@ void FunctionCompiler::enter() {
 // Continues where the interpreter would after the block's last
 // instruction, which returned next.
 void FunctionCompiler::terminate(const Block& block, llvm::Value* next) {
-    switch (GET_OPCODE(ir.nodes[block.instructions.back()].bytecode)) {
-    case OP_CALL:
+    LUAMURA_SWITCH(ir.nodes[block.instructions.back()].bytecode) {
+    LUAMURA_CASE(CALL):
         return afterCall(next, llvm_blocks[block.successors.front()->id]);
-    case OP_TAILCALL:
+    LUAMURA_CASE(TAILCALL):
         return tailCall(next);
-    case OP_RETURN:
-    case OP_RETURN0:
-    case OP_RETURN1:
+    LUAMURA_CASE(RETURN):
+    LUAMURA_CASE(RETURN0):
+    LUAMURA_CASE(RETURN1):
         builder.CreateRet(next);
         return;
     default:
