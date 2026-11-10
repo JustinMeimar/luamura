@@ -94,7 +94,6 @@ private:
     void buildBlocks();
     void buildNodes();
     using DominatorTree = llvm::DominatorTreeBase<Block, false>;
-    void buildBytecodeNode(Block& block, PC pc);
     void insertPhis(DominatorTree& dominators);
     void renameValues(DominatorTree& dominators);
 };

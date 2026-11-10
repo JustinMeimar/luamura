@@ -1,4 +1,5 @@
 #include "lm_ir.h"
+#include "lm_effects.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/StringExtras.h>
@@ -10,27 +11,6 @@
 extern "C" {
 #include "lopnames.h"
 }
-
-namespace llvm {
-
-template <> struct DOTGraphTraits<luamura::LmIR*> : DefaultDOTGraphTraits {
-    using DefaultDOTGraphTraits::DefaultDOTGraphTraits;
-
-    std::string getNodeLabel(const luamura::Block* block,
-                             const luamura::LmIR* ir) {
-        std::string label;
-        llvm::raw_string_ostream out(label);
-        ir->printBlock(out, *block);
-        // left-justify each line, as dot centers them by default
-        llvm::StringRef text = label;
-        std::string justified;
-        for (llvm::StringRef line : llvm::split(text.rtrim('\n'), '\n'))
-            justified += (line + "\\l").str();
-        return justified;
-    }
-};
-
-} // namespace llvm
 
 namespace luamura {
 
@@ -168,63 +148,17 @@ void LmIR::addOutput(Node& node, unsigned slot) {
     values.push_back({node.id, slot});
 }
 
-void LmIR::buildBytecodeNode(Block& block, PC pc) {
-    Node& node = addNode(block, Node::Kind::Bytecode, pc);
-    Instruction i = node.bytecode = proto.code[pc];
-    unsigned a = GETARG_A(i);
-    auto addInput = [&](unsigned slot) {
-        if (llvm::none_of(node.inputs, [&](const Operand& op) {
-                return op.slot == slot;
-            }))
-            node.inputs.push_back({slot});
-    };
-    switch (GET_OPCODE(i)) {
-    case OP_MOVE:
-    case OP_NOT:
-        addInput(GETARG_B(i));
-        addOutput(node, a);
-        break;
-    case OP_LOADI:
-    case OP_LOADF:
-    case OP_LOADK:
-    case OP_LOADKX:
-    case OP_LOADFALSE:
-    case OP_LOADTRUE:
-    case OP_LFALSESKIP:
-        addOutput(node, a);
-        break;
-    case OP_LOADNIL:
-        for (unsigned s = a; s <= a + GETARG_B(i); ++s)
-            addOutput(node, s);
-        break;
-    case OP_JMP:
-        break;
-    case OP_TEST:
-        addInput(a);
-        break;
-    case OP_TESTSET:
-        addInput(a);
-        addInput(GETARG_B(i));
-        addOutput(node, a);
-        break;
-    default:
-        // Runtime calls can change slots through open upvalues.
-        node.effects = Node::Effects::Runtime;
-        for (unsigned s = 0; s < proto.maxstacksize; ++s) {
-            addInput(s);
-            addOutput(node, s);
-        }
-        break;
-    }
-}
-
 void LmIR::buildNodes() {
     Node& entry = addNode(getEntryBlock(), Node::Kind::FrameRead);
     for (unsigned slot = 0; slot < proto.maxstacksize; ++slot)
         addOutput(entry, slot);
+    EffectModel effects(*this);
     for (auto& block : llvm::drop_begin(blocks))
-        for (PC pc = block->start; pc < block->end; ++pc)
-            buildBytecodeNode(*block, pc);
+        for (PC pc = block->start; pc < block->end; ++pc) {
+            Node& node = addNode(*block, Node::Kind::Bytecode, pc);
+            node.bytecode = proto.code[pc];
+            effects.model(node);
+        }
 }
 
 void LmIR::insertPhis(DominatorTree& dominators) {
@@ -352,3 +286,24 @@ void LmIR::writeGraph(llvm::raw_ostream& out, const llvm::Twine& name) {
 }
 
 } // namespace luamura
+  
+namespace llvm {
+
+template <> struct DOTGraphTraits<luamura::LmIR*> : DefaultDOTGraphTraits {
+    using DefaultDOTGraphTraits::DefaultDOTGraphTraits;
+
+    std::string getNodeLabel(const luamura::Block* block,
+                             const luamura::LmIR* ir) {
+        std::string label;
+        llvm::raw_string_ostream out(label);
+        ir->printBlock(out, *block);
+        // left-justify each line, as dot centers them by default
+        llvm::StringRef text = label;
+        std::string justified;
+        for (llvm::StringRef line : llvm::split(text.rtrim('\n'), '\n'))
+            justified += (line + "\\l").str();
+        return justified;
+    }
+};
+
+} // namespace llvm
