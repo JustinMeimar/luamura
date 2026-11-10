@@ -17,13 +17,13 @@ namespace luamura {
 
 using PC = int32_t;
 using ValueID = uint32_t;
-using FrameSlot = uint32_t;
+using Slot = uint32_t;
 constexpr ValueID no_value = UINT32_MAX;
 class LmIR;
 struct Block;
 
 struct Operand {
-    FrameSlot slot;
+    Slot slot;
     ValueID value = no_value;
 };
 
@@ -48,7 +48,7 @@ struct Node {
 
 struct Value {
     uint32_t node;
-    FrameSlot slot;
+    Slot slot;
 };
 
 struct Block {
@@ -81,7 +81,7 @@ public:
     Block& getEntryBlock() { return *blocks.front(); }
 
     Node& addNode(Block& block, Node::Kind kind, PC pc = -1);
-    void addOutput(Node& node, FrameSlot slot);
+    void addOutput(Node& node, Slot slot);
     void print(llvm::raw_ostream& out) const;
     void printBlock(llvm::raw_ostream& out, const Block& block) const;
     void writeGraph(llvm::raw_ostream& out, const llvm::Twine& name);

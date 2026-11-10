@@ -26,33 +26,33 @@ void EffectModel::findCapturedSlots() {
     captured.erase(llvm::unique(captured), captured.end());
 }
 
-bool EffectModel::reads(FrameSlot slot) const {
+bool EffectModel::reads(Slot slot) const {
     return llvm::any_of(node->inputs,
                         [&](const Operand& op) { return op.slot == slot; });
 }
 
-bool EffectModel::writes(FrameSlot slot) const {
+bool EffectModel::writes(Slot slot) const {
     return llvm::any_of(node->outputs,
                         [&](const Operand& op) { return op.slot == slot; });
 }
 
-void EffectModel::read(FrameSlot slot) {
+void EffectModel::read(Slot slot) {
     if (slot < top && !reads(slot))
         node->inputs.push_back({slot});
 }
 
-void EffectModel::write(FrameSlot slot) {
+void EffectModel::write(Slot slot) {
     if (slot < top && !writes(slot))
         ir.addOutput(*node, slot);
 }
 
-void EffectModel::readRange(FrameSlot from, FrameSlot to) {
-    for (FrameSlot slot = from; slot < std::min(to, top); ++slot)
+void EffectModel::readRange(Slot from, Slot to) {
+    for (Slot slot = from; slot < std::min(to, top); ++slot)
         read(slot);
 }
 
-void EffectModel::writeRange(FrameSlot from, FrameSlot to) {
-    for (FrameSlot slot = from; slot < std::min(to, top); ++slot)
+void EffectModel::writeRange(Slot from, Slot to) {
+    for (Slot slot = from; slot < std::min(to, top); ++slot)
         write(slot);
 }
 
@@ -60,14 +60,14 @@ void EffectModel::writeRange(FrameSlot from, FrameSlot to) {
 // code, which can reach captured slots.
 void EffectModel::runsLua() {
     node->effects = Node::Effects::Runtime;
-    for (FrameSlot slot : captured) {
+    for (Slot slot : captured) {
         read(slot);
         write(slot);
     }
 }
 
 // A count of zero means the values run to the top of the stack.
-FrameSlot EffectModel::upTo(uint32_t count, FrameSlot end) const {
+Slot EffectModel::upTo(uint32_t count, Slot end) const {
     return count == 0 ? top : end;
 }
 
@@ -75,7 +75,7 @@ void EffectModel::model(Node& node) {
     this->node = &node;
     Instruction i = node.bytecode;
     OpCode op = GET_OPCODE(i);
-    FrameSlot a = GETARG_A(i);
+    Slot a = GETARG_A(i);
     uint32_t b = GETARG_B(i);
     uint32_t c = GETARG_C(i);
 
