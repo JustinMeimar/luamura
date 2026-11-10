@@ -1,6 +1,7 @@
 #include "lm_ir.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/GenericDomTreeConstruction.h>
 #include <llvm/Support/GenericIteratedDominanceFrontier.h>
 
@@ -9,6 +10,27 @@
 extern "C" {
 #include "lopnames.h"
 }
+
+namespace llvm {
+
+template <> struct DOTGraphTraits<luamura::LmIR*> : DefaultDOTGraphTraits {
+    using DefaultDOTGraphTraits::DefaultDOTGraphTraits;
+
+    std::string getNodeLabel(const luamura::Block* block,
+                             const luamura::LmIR* ir) {
+        std::string label;
+        llvm::raw_string_ostream out(label);
+        ir->printBlock(out, *block);
+        // left-justify each line, as dot centers them by default
+        llvm::StringRef text = label;
+        std::string justified;
+        for (llvm::StringRef line : llvm::split(text.rtrim('\n'), '\n'))
+            justified += (line + "\\l").str();
+        return justified;
+    }
+};
+
+} // namespace llvm
 
 namespace luamura {
 
@@ -285,41 +307,48 @@ void Block::printAsOperand(llvm::raw_ostream& out, bool) const {
     out << "b" << id;
 }
 
+void LmIR::printBlock(llvm::raw_ostream& out, const Block& block) const {
+    out << "b" << block.id << " (pc " << block.start << "):\n";
+    auto printNode = [&](uint32_t id) {
+        const Node& node = nodes[id];
+        out << "  n" << id << " ";
+        for (const Operand& op : node.outputs)
+            out << "%" << op.value << "[R" << op.slot << "] ";
+        out << "= ";
+        if (node.kind == Node::Kind::Phi) {
+            out << "phi";
+            for (const PhiInput& in : node.incoming)
+                out << " [b" << in.predecessor->id << ": %" << in.value
+                    << "]";
+        } else if (node.kind == Node::Kind::FrameRead) {
+            out << "frame_read";
+        } else {
+            out << opnames[GET_OPCODE(node.bytecode)] << " @" << node.pc;
+            for (const Operand& op : node.inputs)
+                out << " %" << op.value << "[R" << op.slot << "]";
+            if (node.effects == Node::Effects::Runtime)
+                out << " [runtime]";
+        }
+        out << "\n";
+    };
+    for (uint32_t id : block.phis)
+        printNode(id);
+    for (uint32_t id : block.instructions)
+        printNode(id);
+}
+
 void LmIR::print(llvm::raw_ostream& out) const {
     for (const auto& block : blocks) {
-        out << "b" << block->id << " (pc " << block->start << "):\n";
-        auto printNode = [&](uint32_t id) {
-            const Node& node = nodes[id];
-            out << "  n" << id << " ";
-            for (const Operand& op : node.outputs)
-                out << "%" << op.value << "[R" << op.slot << "] ";
-            out << "= ";
-            if (node.kind == Node::Kind::Phi) {
-                out << "phi";
-                for (const PhiInput& in : node.incoming)
-                    out << " [b" << in.predecessor->id << ": %" << in.value
-                        << "]";
-            } else if (node.kind == Node::Kind::FrameRead) {
-                out << "frame_read";
-            } else {
-                out << opnames[GET_OPCODE(node.bytecode)] << " @"
-                    << node.pc;
-                for (const Operand& op : node.inputs)
-                    out << " %" << op.value << "[R" << op.slot << "]";
-                if (node.effects == Node::Effects::Runtime)
-                    out << " [runtime]";
-            }
-            out << "\n";
-        };
-        for (uint32_t id : block->phis)
-            printNode(id);
-        for (uint32_t id : block->instructions)
-            printNode(id);
+        printBlock(out, *block);
         out << "  ->";
         for (Block* next : block->successors)
             out << " b" << next->id;
         out << "\n";
     }
+}
+
+void LmIR::writeGraph(llvm::raw_ostream& out, const llvm::Twine& name) {
+    llvm::WriteGraph(out, this, false, name);
 }
 
 } // namespace luamura

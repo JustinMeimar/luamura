@@ -1,10 +1,11 @@
 #ifndef LM_LUA_H
 #define LM_LUA_H
 
-// Lua defines a function-like macro 'cast', which LLVM declares as a
-// function. Declaring LLVM's first leaves only its calls, cast<T>(x),
-// which the macro does not match.
+// Lua defines function-like macros 'cast' and 'G', names LLVM uses.
+// Including LLVM's headers first leaves only uses the macros do not
+// match, such as cast<T>(x).
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/GraphWriter.h>
 
 extern "C" {
 #include "lauxlib.h"

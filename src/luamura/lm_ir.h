@@ -4,6 +4,7 @@
 #include "lm_lua.h"
 
 #include <llvm/ADT/GraphTraits.h>
+#include <llvm/ADT/Twine.h>
 #include <llvm/ADT/iterator.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/GenericDomTree.h>
@@ -81,6 +82,8 @@ public:
     Node& addNode(Block& block, Node::Kind kind, PC pc = -1);
     void addOutput(Node& node, unsigned slot);
     void print(llvm::raw_ostream& out) const;
+    void printBlock(llvm::raw_ostream& out, const Block& block) const;
+    void writeGraph(llvm::raw_ostream& out, const llvm::Twine& name);
 
     const Proto& proto;
     std::vector<std::unique_ptr<Block>> blocks;

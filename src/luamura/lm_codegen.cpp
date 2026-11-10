@@ -188,14 +188,28 @@ void ModuleCompiler::define(const char* name, llvm::Constant* value) {
                              name);
 }
 
+// Named as the LLVM function, to read the graph against the .ll.
+static void writeGraph(LmIR& ir, const std::string& name) {
+    std::error_code ec;
+    llvm::raw_fd_ostream out(name + ".dot", ec);
+    if (ec) {
+        llvm::errs() << "luamura: cannot write " << name
+                     << ".dot: " << ec.message() << "\n";
+        return;
+    }
+    ir.writeGraph(out, name);
+}
+
 // The runtime attaches the functions to the chunk's Protos in preorder.
 void ModuleCompiler::compileFunction(const Proto& proto) {
     LmIR ir(proto);
     passes.run(ir);
+    std::string name = "lm_function_" + std::to_string(functions.size());
     if (std::getenv("LUAMURA_DUMP_IR"))
         ir.print(llvm::errs());
-    functions.push_back(FunctionCompiler(*this, ir).compile(
-        "lm_function_" + llvm::Twine(functions.size())));
+    if (std::getenv("LUAMURA_DUMP_DOT"))
+        writeGraph(ir, name);
+    functions.push_back(FunctionCompiler(*this, ir).compile(name));
     for (const Proto* nested : llvm::ArrayRef(proto.p, proto.sizep))
         compileFunction(*nested);
 }
