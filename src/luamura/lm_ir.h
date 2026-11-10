@@ -52,17 +52,29 @@ struct Value {
 };
 
 struct Block {
+    // How control leaves the block, after its last instruction.
+    enum class Terminator {
+        // to the saved pc: the function's start, or after a call
+        Resume,
+        // to the successor at the pc the last instruction left
+        Branch,
+        // a Lua callee is left to the interpreter
+        Call,
+        TailCall,
+        Return,
+    };
+
     LmIR* parent;
     uint32_t id;
-    PC start;
-    PC end;
+    // the pc the block starts at, if the interpreter can be there
+    PC start = -1;
+    Terminator terminator = Terminator::Branch;
     std::vector<Block*> predecessors;
     std::vector<Block*> successors;
     std::vector<uint32_t> phis;
     std::vector<uint32_t> instructions;
 
     LmIR* getParent() const { return parent; }
-    PC last() const { return end - 1; }
     void printAsOperand(llvm::raw_ostream& out, bool) const;
 };
 
@@ -92,8 +104,9 @@ public:
     std::vector<Value> values;
 
 private:
-    void buildBlocks();
-    void buildNodes();
+    std::vector<PC> buildBlocks();
+    void buildNodes(const std::vector<PC>& ends);
+    Block::Terminator terminatorAt(PC last) const;
     using DominatorTree = llvm::DominatorTreeBase<Block, false>;
     void insertPhis(DominatorTree& dominators);
     void renameValues(DominatorTree& dominators);

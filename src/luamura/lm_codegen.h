@@ -70,6 +70,7 @@ private:
     llvm::Value* lowerBlock(const Block& block);
     llvm::Value* projectOpHandler(const Node& node);
     void enter();
+    void resume(const Block& block);
     void terminate(const Block& block, llvm::Value* next);
     void toSuccessors(const Block& block);
     void afterCall(llvm::Value* next, llvm::BasicBlock* successor);

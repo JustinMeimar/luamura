@@ -28,10 +28,15 @@ BaselineCompiler::BaselineCompiler(llvm::Module& module,
       lm_compiled(module.getOrInsertFunction("lm_compiled", ptr_ty, ptr_ty,
                                              ptr_ty)) {}
 
+// Returns what the block's last instruction returned.
 llvm::Value* FunctionCompiler::lowerBlock(const Block& block) {
     llvm::Value* next = nullptr;
-    for (uint32_t id : block.instructions)
-        next = projectOpHandler(ir.nodes[id]);
+    for (uint32_t id : block.instructions) {
+        const Node& node = ir.nodes[id];
+        // values live in the Lua stack, which needs no reading
+        if (node.kind == Node::Kind::Bytecode)
+            next = projectOpHandler(node);
+    }
     return next;
 }
 
@@ -68,52 +73,55 @@ llvm::Function* FunctionCompiler::compile(const llvm::Twine& name) {
     frame.L = function->getArg(0);
     frame.ci = function->getArg(1);
 
-    auto* entry = createBlock();
-    interpret = createBlock();
     // named for reading the IR against the bytecode
-    llvm_blocks.push_back(entry);
-    for (const auto& block : llvm::drop_begin(ir.blocks))
+    for (const auto& block : ir.blocks)
         llvm_blocks.push_back(
-            createBlock("pc" + llvm::Twine(block->start)));
+            block->start < 0
+                ? createBlock()
+                : createBlock("pc" + llvm::Twine(block->start)));
+    interpret = createBlock();
 
     builder.SetInsertPoint(interpret);
     builder.CreateRet(frame.ci);
-    builder.SetInsertPoint(entry);
+    builder.SetInsertPoint(llvm_blocks.front());
     enter();
 
-    for (const auto& block : llvm::drop_begin(ir.blocks)) {
+    for (const auto& block : ir.blocks) {
         builder.SetInsertPoint(llvm_blocks[block->id]);
         terminate(*block, lowerBlock(*block));
     }
     return function;
 }
 
-// Resumes at the saved pc: the function's start, or after a call.
 void FunctionCompiler::enter() {
     frame.pc = builder.CreateAlloca(ptr_ty);
     frame.code = builder.CreateCall(lm_code, {frame.ci});
+}
+
+// Continues at the saved pc: the function's start, or after a call.
+void FunctionCompiler::resume(const Block& block) {
     auto* saved = builder.CreateCall(lm_resume, {frame.ci});
-    auto* resume = builder.CreateSwitch(saved, interpret);
-    for (const Block* target : ir.blocks.front()->successors)
-        resume->addCase(builder.getInt32(target->start),
-                        llvm_blocks[target->id]);
+    auto* to = builder.CreateSwitch(saved, interpret);
+    for (const Block* target : block.successors)
+        to->addCase(builder.getInt32(target->start),
+                    llvm_blocks[target->id]);
 }
 
 // Continues where the interpreter would after the block's last
 // instruction, which returned next.
 void FunctionCompiler::terminate(const Block& block, llvm::Value* next) {
-    LUAMURA_SWITCH(ir.nodes[block.instructions.back()].bytecode) {
-    LUAMURA_CASE(CALL):
+    switch (block.terminator) {
+    case Block::Terminator::Resume:
+        return resume(block);
+    case Block::Terminator::Branch:
+        return toSuccessors(block);
+    case Block::Terminator::Call:
         return afterCall(next, llvm_blocks[block.successors.front()->id]);
-    LUAMURA_CASE(TAILCALL):
+    case Block::Terminator::TailCall:
         return tailCall(next);
-    LUAMURA_CASE(RETURN):
-    LUAMURA_CASE(RETURN0):
-    LUAMURA_CASE(RETURN1):
+    case Block::Terminator::Return:
         builder.CreateRet(next);
         return;
-    default:
-        return toSuccessors(block);
     }
 }
 

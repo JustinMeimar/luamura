@@ -66,15 +66,15 @@ static std::vector<PC> successorPCs(const Proto& proto, PC pc) {
 }
 
 LmIR::LmIR(const Proto& proto) : proto(proto) {
-    buildBlocks();
-    buildNodes();
+    buildNodes(buildBlocks());
     DominatorTree dominators;
     dominators.recalculate(*this);
     insertPhis(dominators);
     renameValues(dominators);
 }
 
-void LmIR::buildBlocks() {
+// The pc each block ends at, indexed by its start.
+std::vector<PC> LmIR::buildBlocks() {
     std::vector<bool> leaders(proto.sizecode, false);
     leaders[0] = true;
     for (PC pc = 0; pc < proto.sizecode; ++pc) {
@@ -104,20 +104,20 @@ void LmIR::buildBlocks() {
         for (PC target : successorPCs(proto, ends[pc] - 1))
             work.push_back(target);
     }
-    auto add = [&](PC start, PC end) {
+    auto add = [&](PC start, Block::Terminator terminator) {
         auto block = std::make_unique<Block>();
         block->parent = this;
         block->id = blocks.size();
         block->start = start;
-        block->end = end;
+        block->terminator = terminator;
         blocks.push_back(std::move(block));
         return blocks.back().get();
     };
-    Block* entry = add(-1, -1);
+    Block* entry = add(-1, Block::Terminator::Resume);
     std::vector<Block*> at(proto.sizecode, nullptr);
     for (PC pc = 0; pc < proto.sizecode; ++pc)
         if (reached[pc])
-            at[pc] = add(pc, ends[pc]);
+            at[pc] = add(pc, terminatorAt(ends[pc] - 1));
     auto connect = [](Block* from, Block* to) {
         if (llvm::is_contained(from->successors, to))
             return;
@@ -126,10 +126,27 @@ void LmIR::buildBlocks() {
     };
     connect(entry, at[0]);
     for (auto& block : llvm::drop_begin(blocks)) {
-        for (PC target : successorPCs(proto, block->last()))
+        PC last = ends[block->start] - 1;
+        for (PC target : successorPCs(proto, last))
             connect(block.get(), at[target]);
-        if (isCall(proto, block->last()))
+        if (isCall(proto, last))
             connect(entry, block->successors.front());
+    }
+    return ends;
+}
+
+Block::Terminator LmIR::terminatorAt(PC last) const {
+    LUAMURA_SWITCH(proto.code[last]) {
+    LUAMURA_CASE(CALL):
+        return Block::Terminator::Call;
+    LUAMURA_CASE(TAILCALL):
+        return Block::Terminator::TailCall;
+    LUAMURA_CASE(RETURN):
+    LUAMURA_CASE(RETURN0):
+    LUAMURA_CASE(RETURN1):
+        return Block::Terminator::Return;
+    default:
+        return Block::Terminator::Branch;
     }
 }
 
@@ -148,13 +165,13 @@ void LmIR::addOutput(Node& node, Slot slot) {
     values.push_back({node.id, slot});
 }
 
-void LmIR::buildNodes() {
+void LmIR::buildNodes(const std::vector<PC>& ends) {
     Node& entry = addNode(getEntryBlock(), Node::Kind::FrameRead);
     for (Slot slot = 0; slot < proto.maxstacksize; ++slot)
         addOutput(entry, slot);
     EffectModel effects(*this);
     for (auto& block : llvm::drop_begin(blocks))
-        for (PC pc = block->start; pc < block->end; ++pc) {
+        for (PC pc = block->start; pc < ends[block->start]; ++pc) {
             Node& node = addNode(*block, Node::Kind::Bytecode, pc);
             node.bytecode = proto.code[pc];
             effects.model(node);
@@ -242,7 +259,10 @@ void Block::printAsOperand(llvm::raw_ostream& out, bool) const {
 }
 
 void LmIR::printBlock(llvm::raw_ostream& out, const Block& block) const {
-    out << "b" << block.id << " (pc " << block.start << "):\n";
+    out << "b" << block.id;
+    if (block.start >= 0)
+        out << " (pc " << block.start << ")";
+    out << ":\n";
     auto printNode = [&](uint32_t id) {
         const Node& node = nodes[id];
         out << "  n" << id << " ";
