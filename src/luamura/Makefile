@@ -30,7 +30,7 @@ BITCODE= $(OBJ)/lua/lvm.bc $(OBJ)/lua/ltable.bc
 LUA_T= $(BUILD)/lua
 LUAMURA_T= $(BUILD)/luamura
 LUAMURA_O= $(addprefix $(OBJ)/luamura/, \
-	luamura.o lm_ir.o lm_effects.o lm_pass_integer_specialization.o lm_pass_base_updates.o lm_codegen.o)
+	luamura.o lm_ir.o lm_effects.o lm_pass_type_specialization.o lm_pass_base_updates.o lm_codegen.o)
 RT_O= $(BUILD)/lm_rt.o
 
 TESTS= ../../tests

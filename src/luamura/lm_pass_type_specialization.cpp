@@ -1,9 +1,9 @@
-#include "lm_pass_integer_specialization.h"
+#include "lm_pass_type_specialization.h"
 #include <algorithm>
 
 namespace luamura {
 
-void IntegerSpecialization::run(LmIR& ir) {
+void TypeSpecialization::run(LmIR& ir) {
     size_t count = ir.blocks.size();
     std::vector<bool> covered(count, false);
     for (size_t id = 1; id < count; ++id) {
@@ -25,7 +25,7 @@ void IntegerSpecialization::run(LmIR& ir) {
     }
 }
 
-bool IntegerSpecialization::extendsChain(
+bool TypeSpecialization::extendsChain(
     const Node& node, const std::vector<bool>& integers) const {
     if (node.kind != Node::Kind::Bytecode)
         return false;
@@ -37,8 +37,8 @@ bool IntegerSpecialization::extendsChain(
         [&](const Operand& input) { return integers[input.slot]; });
 }
 
-void IntegerSpecialization::specialize(LmIR& ir, Block& block,
-                                       std::vector<bool>& covered) {
+void TypeSpecialization::specialize(LmIR& ir, Block& block,
+                                    std::vector<bool>& covered) {
     Node first = ir.nodes[block.instructions.back()];
     Block& slow = ir.splitBlock(block, block.instructions.size() - 1);
     Block& hot = ir.addBlock();

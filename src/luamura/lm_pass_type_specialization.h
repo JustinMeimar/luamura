@@ -1,5 +1,5 @@
-#ifndef LM_PASS_INTEGER_SPECIALIZATION_H
-#define LM_PASS_INTEGER_SPECIALIZATION_H
+#ifndef LM_PASS_TYPE_SPECIALIZATION_H
+#define LM_PASS_TYPE_SPECIALIZATION_H
 
 #include "lm_pass.h"
 #include <vector>
@@ -8,7 +8,9 @@ namespace luamura {
 
 // Guards ADD and ADDI operands, then keeps a bounded arithmetic chain
 // on its integer path, skipping each operation's metamethod fallback.
-class IntegerSpecialization : public LmIRPass {
+// TODO: only integers are specialized so far. Measure the operand types
+// at arithmetic sites across the benchmarks before generalizing.
+class TypeSpecialization : public LmIRPass {
 public:
     void run(LmIR& ir) override;
 
@@ -20,4 +22,4 @@ private:
 
 } // namespace luamura
 
-#endif // LM_PASS_INTEGER_SPECIALIZATION_H
+#endif // LM_PASS_TYPE_SPECIALIZATION_H
