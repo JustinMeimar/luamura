@@ -266,8 +266,8 @@ std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
                                             const GuestBytecode& bytecode) {
     LmModule ir(main);
     PassManager passes;
-    passes.add(specializeIntegerArithmetic);
-    passes.add(addBaseUpdates);
+    passes.add(std::make_unique<IntegerSpecialization>());
+    passes.add(std::make_unique<BaseUpdates>());
     passes.run(ir);
     for (size_t index = 0; index < ir.functions.size(); ++index) {
         if (std::getenv("LUAMURA_DUMP_IR"))

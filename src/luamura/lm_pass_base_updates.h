@@ -1,13 +1,16 @@
 #ifndef LM_PASS_BASE_UPDATES_H
 #define LM_PASS_BASE_UPDATES_H
 
-#include "lm_ir.h"
+#include "lm_pass.h"
 
 namespace luamura {
 
 // Updates the frame's base on entry and wherever a node may have moved
 // it, so that code generation can rely on it.
-void addBaseUpdates(LmIR& ir);
+class BaseUpdates : public LmIRPass {
+public:
+    void run(LmIR& ir) override;
+};
 
 } // namespace luamura
 

@@ -2,7 +2,7 @@
 
 namespace luamura {
 
-void addBaseUpdates(LmIR& ir) {
+void BaseUpdates::run(LmIR& ir) {
     ir.insertNode(ir.getEntryBlock(), 0, Node::Kind::UpdateBase);
     for (auto& block : ir.blocks) {
         // A call continues at its successor, and a return or tail call

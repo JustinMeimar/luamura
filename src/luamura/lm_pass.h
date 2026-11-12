@@ -2,25 +2,31 @@
 #define LM_PASS_H
 
 #include "lm_ir.h"
-
+#include <memory>
 #include <vector>
 
 namespace luamura {
 
 // A pass over one function's LmIR.
-using LmIRPass = void (*)(LmIR&);
+class LmIRPass {
+public:
+    virtual ~LmIRPass() = default;
+    virtual void run(LmIR& ir) = 0;
+};
 
 class PassManager {
 public:
-    void add(LmIRPass pass) { passes.push_back(pass); }
+    void add(std::unique_ptr<LmIRPass> pass) {
+        passes.push_back(std::move(pass));
+    }
     void run(LmModule& module) const {
         for (auto& ir : module.functions)
-            for (LmIRPass pass : passes)
-                pass(*ir);
+            for (const auto& pass : passes)
+                pass->run(*ir);
     }
 
 private:
-    std::vector<LmIRPass> passes;
+    std::vector<std::unique_ptr<LmIRPass>> passes;
 };
 
 } // namespace luamura
