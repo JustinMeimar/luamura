@@ -22,7 +22,7 @@ public:
             if (op == OP_ADD || op == OP_ADDI)
                 addHotPath(block, covered);
         }
-        ir.rebuildSSA();
+        ir.updateSSA();
         for (auto& block : ir.blocks) {
             if (block->terminator != Block::Terminator::Guard)
                 continue;

@@ -65,10 +65,7 @@ static std::vector<PC> successorPCs(const Proto& proto, PC pc) {
 
 LmIR::LmIR(const Proto& proto) : proto(proto) {
     buildNodes(buildBlocks());
-    DominatorTree dominators;
-    dominators.recalculate(*this);
-    insertPhis(dominators);
-    renameValues(dominators);
+    updateSSA();
 }
 
 // The pc each block ends at, indexed by its start.
@@ -186,29 +183,7 @@ void LmIR::addOutput(Node& node, Slot slot) {
     values.push_back({node.id, slot});
 }
 
-void LmIR::rebuildSSA() {
-    auto previous = std::move(nodes);
-    nodes.clear();
-    values.clear();
-    for (auto& block : blocks) {
-        auto instructions = std::move(block->instructions);
-        block->instructions.clear();
-        block->phis.clear();
-        block->types.clear();
-        for (uint32_t id : instructions) {
-            Node copy = std::move(previous[id]);
-            copy.id = nodes.size();
-            copy.incoming.clear();
-            for (Operand& input : copy.inputs)
-                input.value = no_value;
-            for (Operand& output : copy.outputs) {
-                output.value = values.size();
-                values.push_back({copy.id, output.slot});
-            }
-            block->instructions.push_back(copy.id);
-            nodes.push_back(std::move(copy));
-        }
-    }
+void LmIR::updateSSA() {
     DominatorTree dominators;
     dominators.recalculate(*this);
     insertPhis(dominators);
@@ -264,11 +239,21 @@ void LmIR::insertPhis(DominatorTree& dominators) {
         llvm::SmallVector<Block*, 16> joins;
         idf.calculate(joins);
         for (Block* block : joins)
-            addOutput(addNode(*block, Node::Kind::Phi), slot);
+            if (!hasPhi(*block, slot))
+                addOutput(addNode(*block, Node::Kind::Phi), slot);
     }
 }
 
+bool LmIR::hasPhi(const Block& block, Slot slot) const {
+    return llvm::any_of(block.phis, [&](uint32_t id) {
+        return nodes[id].outputs.front().slot == slot;
+    });
+}
+
 void LmIR::renameValues(DominatorTree& dominators) {
+    for (auto& block : blocks)
+        for (uint32_t id : block->phis)
+            nodes[id].incoming.clear();
     using State = std::vector<ValueID>;
     struct Visit {
         llvm::DomTreeNodeBase<Block>* tree;

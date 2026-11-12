@@ -112,7 +112,9 @@ public:
     Block& splitBlock(Block& block, size_t index);
     Node& addNode(Block& block, Node::Kind kind, PC pc = -1);
     void addOutput(Node& node, Slot slot);
-    void rebuildSSA();
+    // Places the phis a changed graph needs and resolves each input to
+    // its value. Existing nodes and values keep their IDs.
+    void updateSSA();
     void print(llvm::raw_ostream& out) const;
     void printBlock(llvm::raw_ostream& out, const Block& block) const;
     void writeGraph(llvm::raw_ostream& out, const llvm::Twine& name);
@@ -127,6 +129,7 @@ private:
     void buildNodes(const std::vector<PC>& ends);
     Block::Terminator terminatorAt(PC last) const;
     using DominatorTree = llvm::DominatorTreeBase<Block, false>;
+    bool hasPhi(const Block& block, Slot slot) const;
     void insertPhis(DominatorTree& dominators);
     void renameValues(DominatorTree& dominators);
 };
