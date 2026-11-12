@@ -1,5 +1,5 @@
 #include "lm_hot_paths.h"
-
+#include <algorithm>
 #include <vector>
 
 namespace luamura {
@@ -11,73 +11,78 @@ public:
     explicit AddIntegerHotPaths(LmIR& ir) : ir(ir) {}
 
     void run() {
-        // only the blocks from bytecode; the ones added here are hot
-        // paths already
         size_t count = ir.blocks.size();
+        std::vector<bool> covered(count, false);
         for (size_t id = 1; id < count; ++id) {
             Block& block = *ir.blocks[id];
+            if (covered[id] || block.instructions.empty())
+                continue;
             OpCode op =
                 GET_OPCODE(ir.nodes[block.instructions.back()].bytecode);
             if (op == OP_ADD || op == OP_ADDI)
-                addHotPath(block);
+                addHotPath(block, covered);
+        }
+        ir.rebuildSSA();
+        for (auto& block : ir.blocks) {
+            if (block->terminator != Block::Terminator::Guard)
+                continue;
+            const Node& guard = ir.nodes[block->instructions.back()];
+            for (const Operand& input : guard.inputs)
+                block->successors.front()->types[input.value] = LUA_VNUMINT;
         }
     }
 
 private:
-    // The value of slot before the add, as its node reads it.
-    ValueID valueBefore(uint32_t add, Slot slot) const {
-        for (const Operand& op : ir.nodes[add].inputs)
-            if (op.slot == slot)
-                return op.value;
-        return no_value;
+    bool extendsChain(const Node& node,
+                      const std::vector<bool>& integers) const {
+        if (node.kind != Node::Kind::Bytecode)
+            return false;
+        OpCode op = GET_OPCODE(node.bytecode);
+        if (op != OP_ADD && op != OP_ADDI && op != OP_SUB && op != OP_MUL)
+            return false;
+        return std::all_of(
+            node.inputs.begin(), node.inputs.end(),
+            [&](const Operand& input) { return integers[input.slot]; });
     }
 
-    // Splits the add from block:
-    //   block: ..., guard -> hot | slow
-    //   hot:   the add, on integers -> after the metamethod call
-    //   slow:  the add, as before
-    void addHotPath(Block& block) {
-        uint32_t add = block.instructions.back();
-        PC pc = ir.nodes[add].pc;
-        Instruction i = ir.nodes[add].bytecode;
-        Slot a = GETARG_A(i);
-        std::vector<Operand> operands = ir.nodes[add].inputs;
-
+    void addHotPath(Block& block, std::vector<bool>& covered) {
+        Node first = ir.nodes[block.instructions.back()];
         Block& slow = ir.splitBlock(block, block.instructions.size() - 1);
-        // the add skips the metamethod call when it succeeds
-        Block& after = *slow.successors.front();
         Block& hot = ir.addBlock();
-
-        ir.addNode(block, Node::Kind::Guard, pc).inputs = operands;
+        ir.addNode(block, Node::Kind::Guard, first.pc).inputs =
+            first.inputs;
         block.terminator = Block::Terminator::Guard;
         ir.addEdge(block, hot);
         ir.addEdge(block, slow);
 
-        for (const Operand& op : operands)
-            hot.types[op.value] = LUA_VNUMINT;
-        Node& copy = ir.addNode(hot, Node::Kind::Bytecode, pc);
-        copy.bytecode = i;
-        copy.inputs = operands;
-        ir.addOutput(copy, a);
-        ValueID result = copy.outputs.front().value;
-        ir.addEdge(hot, after);
-
-        for (uint32_t id : after.phis) {
-            Node& phi = ir.nodes[id];
-            Slot slot = phi.outputs.front().slot;
-            ValueID value = slot == a ? result : valueBefore(add, slot);
-            if (value == no_value)
-                value = incomingFrom(phi, slow);
-            phi.incoming.push_back({&hot, value});
+        std::vector<bool> integers(ir.proto.maxstacksize, false);
+        for (const Operand& input : first.inputs)
+            integers[input.slot] = true;
+        Block* source = &slow;
+        Block* after = nullptr;
+        // Bound duplication while measuring the benefit of longer paths.
+        constexpr uint32_t maxOperations = 8;
+        for (uint32_t count = 0; count < maxOperations; ++count) {
+            Node original = ir.nodes[source->instructions.back()];
+            Node& copy = ir.addNode(hot, Node::Kind::Bytecode, original.pc);
+            copy.bytecode = original.bytecode;
+            copy.inputs = original.inputs;
+            for (const Operand& output : original.outputs) {
+                ir.addOutput(copy, output.slot);
+                integers[output.slot] = true;
+            }
+            if (source->id < covered.size())
+                covered[source->id] = true;
+            after = source->successors.front();
+            if (after->instructions.size() != 1 ||
+                after->terminator != Block::Terminator::Branch)
+                break;
+            const Node& next = ir.nodes[after->instructions.front()];
+            if (next.pc != original.pc + 2 || !extendsChain(next, integers))
+                break;
+            source = after;
         }
-    }
-
-    // A slot the add neither reads nor writes keeps its value.
-    ValueID incomingFrom(const Node& phi, const Block& block) const {
-        for (const PhiInput& in : phi.incoming)
-            if (in.predecessor == &block)
-                return in.value;
-        return no_value;
+        ir.addEdge(hot, *after);
     }
 
     LmIR& ir;

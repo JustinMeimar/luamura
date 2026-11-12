@@ -22,7 +22,8 @@ BaselineLowerer::BaselineLowerer(llvm::Module& module,
       aot_function_ty(
           llvm::FunctionType::get(ptr_ty, {ptr_ty, ptr_ty}, false)),
       op_handler_ty(llvm::FunctionType::get(
-          ptr_ty, {ptr_ty, ptr_ty, ptr_ty, instruction_ty, instruction_ty},
+          ptr_ty,
+          {ptr_ty, ptr_ty, ptr_ty, instruction_ty, instruction_ty, ptr_ty},
           false)),
       lm_code(module.getOrInsertFunction("lm_code", ptr_ty, ptr_ty)),
       lm_resume(module.getOrInsertFunction("lm_resume", i32_ty, ptr_ty)),
@@ -35,16 +36,53 @@ void BaselineLowerer::lowerPhi(const Node&) {}
 
 void BaselineLowerer::lowerBytecode(const Node& node) {
     next = projectOpHandler(node);
+    OpCode op = GET_OPCODE(node.bytecode);
+    if (op == OP_CALL || op == OP_TAILCALL || op == OP_RETURN ||
+        op == OP_RETURN0 || op == OP_RETURN1)
+        return;
+    if (!preservesBase(node))
+        refreshBase();
 }
 
-// The address of a field of a TValue in the Lua stack. The stack can
-// move on any call, so its base is loaded each time.
-llvm::Value* BaselineLowerer::slotAddress(Slot slot, size_t field) {
+// Start conservatively: other handlers may relocate or adjust the frame.
+bool BaselineLowerer::preservesBase(const Node& node) const {
+    switch (GET_OPCODE(node.bytecode)) {
+    case OP_MOVE:
+    case OP_LOADI:
+    case OP_LOADF:
+    case OP_LOADK:
+    case OP_LOADKX:
+    case OP_LOADFALSE:
+    case OP_LFALSESKIP:
+    case OP_LOADTRUE:
+    case OP_LOADNIL:
+    case OP_ADDI:
+    case OP_ADDK:
+    case OP_SUBK:
+    case OP_MULK:
+    case OP_ADD:
+    case OP_SUB:
+    case OP_MUL:
+    case OP_JMP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+void BaselineLowerer::refreshBase() {
     auto* func = builder.CreateLoad(
         ptr_ty, builder.CreateInBoundsPtrAdd(
                     frame.ci, builder.getInt64(offsetof(CallInfo, func))));
+    builder.CreateStore(builder.CreateInBoundsPtrAdd(
+                            func, builder.getInt64(sizeof(StackValue))),
+                        frame.base);
+}
+
+llvm::Value* BaselineLowerer::slotAddress(Slot slot, size_t field) {
     return builder.CreateInBoundsPtrAdd(
-        func, builder.getInt64((slot + 1) * sizeof(StackValue) + field));
+        builder.CreateLoad(ptr_ty, frame.base),
+        builder.getInt64(slot * sizeof(StackValue) + field));
 }
 
 // Holds when each input has the type the hot path assumes.
@@ -72,10 +110,10 @@ llvm::Value* BaselineLowerer::projectOpHandler(const Node& node) {
                         frame.pc);
     auto* call = builder.CreateCall(
         module.getOrInsertFunction(std::string("luaV_OP_") +
-                                       opnames[GET_OPCODE(i)],
+                                       opnames[GET_OPCODE(i)] + "_base",
                                    op_handler_ty),
         {frame.L, frame.ci, frame.pc, builder.getInt32(i),
-         builder.getInt32(ni)});
+         builder.getInt32(ni), builder.CreateLoad(ptr_ty, frame.base)});
     call->addFnAttr(llvm::Attribute::AlwaysInline);
     return call;
 }
@@ -134,7 +172,9 @@ void BaselineLowerer::lower(const Block& block) {
 
 void BaselineLowerer::enter() {
     frame.pc = builder.CreateAlloca(ptr_ty);
+    frame.base = builder.CreateAlloca(ptr_ty);
     frame.code = builder.CreateCall(lm_code, {frame.ci});
+    refreshBase();
 }
 
 // Continues at the saved pc: the function's start, or after a call.
@@ -189,6 +229,7 @@ void BaselineLowerer::toSuccessors(const Block& block) {
 // the interpreter runs.
 void BaselineLowerer::afterCall(llvm::BasicBlock* successor) {
     returnIf(builder.CreateIsNotNull(next), next);
+    refreshBase();
     // volatile, as signal handlers set it
     auto* hookmask = builder.CreateLoad(
         i32_ty,

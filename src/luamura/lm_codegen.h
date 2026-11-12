@@ -25,6 +25,7 @@ struct Frame {
     // the function's instructions, and the address of its pc
     llvm::Value* code = nullptr;
     llvm::Value* pc = nullptr;
+    llvm::Value* base = nullptr;
 };
 
 // The baseline backend. Each function becomes a native function whose
@@ -49,6 +50,8 @@ private:
 
     llvm::Value* projectOpHandler(const Node& node);
     llvm::Value* slotAddress(Slot slot, size_t field);
+    bool preservesBase(const Node& node) const;
+    void refreshBase();
     void enter();
     void resume(const Block& block);
     void toSuccessors(const Block& block);

@@ -5,8 +5,8 @@
 
 namespace luamura {
 
-// Gives each ADD and ADDI a hot path, where a guard has found its
-// operands are integers, which skips the metamethod call after it.
+// Guards ADD and ADDI operands, then keeps a bounded arithmetic chain
+// on its integer path, skipping each operation's metamethod fallback.
 void addIntegerHotPaths(LmIR& ir);
 
 } // namespace luamura

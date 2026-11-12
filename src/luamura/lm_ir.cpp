@@ -1,11 +1,9 @@
 #include "lm_ir.h"
 #include "lm_effects.h"
-
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/GenericDomTreeConstruction.h>
 #include <llvm/Support/GenericIteratedDominanceFrontier.h>
-
 #include <algorithm>
 
 extern "C" {
@@ -186,6 +184,35 @@ Node& LmIR::addNode(Block& block, Node::Kind kind, PC pc) {
 void LmIR::addOutput(Node& node, Slot slot) {
     node.outputs.push_back({slot, static_cast<ValueID>(values.size())});
     values.push_back({node.id, slot});
+}
+
+void LmIR::rebuildSSA() {
+    auto previous = std::move(nodes);
+    nodes.clear();
+    values.clear();
+    for (auto& block : blocks) {
+        auto instructions = std::move(block->instructions);
+        block->instructions.clear();
+        block->phis.clear();
+        block->types.clear();
+        for (uint32_t id : instructions) {
+            Node copy = std::move(previous[id]);
+            copy.id = nodes.size();
+            copy.incoming.clear();
+            for (Operand& input : copy.inputs)
+                input.value = no_value;
+            for (Operand& output : copy.outputs) {
+                output.value = values.size();
+                values.push_back({copy.id, output.slot});
+            }
+            block->instructions.push_back(copy.id);
+            nodes.push_back(std::move(copy));
+        }
+    }
+    DominatorTree dominators;
+    dominators.recalculate(*this);
+    insertPhis(dominators);
+    renameValues(dominators);
 }
 
 void LmIR::buildNodes(const std::vector<PC>& ends) {

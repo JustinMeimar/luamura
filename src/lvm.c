@@ -1314,6 +1314,13 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
     return op##_body(L, ci, cl, cl->p->k, ci->func.p + 1, *pc, \
                     lm_trap(ci), i, ni, pc); \
   } \
+  CallInfo *luaV_##op##_base (lua_State *L, CallInfo *ci, \
+                             const Instruction **pc, Instruction i, \
+                             Instruction ni, StkId base) { \
+    LClosure *cl = ci_func(ci); \
+    return op##_body(L, ci, cl, cl->p->k, base, *pc, \
+                    lm_trap(ci), i, ni, pc); \
+  } \
   static CallInfo *op##_body (lua_State *L, CallInfo *ci, LClosure *cl, \
                              TValue *k, StkId base, const Instruction *pc, \
                              int trap, Instruction i, Instruction ni, \
