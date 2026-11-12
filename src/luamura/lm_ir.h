@@ -9,7 +9,9 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/GenericDomTree.h>
 #include <cstdint>
+#include <iterator>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace luamura {
@@ -67,7 +69,33 @@ struct Value {
     Slot slot;
 };
 
+// Visits a block's instructions as nodes rather than as node IDs.
+template <typename NodeT>
+class NodeIterator
+    : public llvm::iterator_adaptor_base<
+          NodeIterator<NodeT>, std::vector<uint32_t>::const_iterator,
+          std::random_access_iterator_tag, NodeT> {
+public:
+    using Nodes =
+        std::conditional_t<std::is_const_v<NodeT>, const std::vector<Node>,
+                           std::vector<Node>>;
+
+    NodeIterator() = default;
+    NodeIterator(Nodes& nodes, std::vector<uint32_t>::const_iterator id)
+        : NodeIterator::iterator_adaptor_base(id), nodes(&nodes) {}
+
+    NodeT& operator*() const { return (*nodes)[*this->I]; }
+    // the node ID's position in its block
+    using NodeIterator::iterator_adaptor_base::wrapped;
+
+private:
+    Nodes* nodes = nullptr;
+};
+
 struct Block {
+    using iterator = NodeIterator<Node>;
+    using const_iterator = NodeIterator<const Node>;
+
     // How control leaves the block, after its last instruction.
     enum class Terminator {
         // to the saved pc: the function's start, or after a call
@@ -95,6 +123,15 @@ struct Block {
     std::vector<uint32_t> phis;
     std::vector<uint32_t> instructions;
 
+    iterator begin();
+    iterator end();
+    const_iterator begin() const;
+    const_iterator end() const;
+    Node& front() { return *begin(); }
+    Node& back() { return *std::prev(end()); }
+    size_t size() const { return instructions.size(); }
+    bool empty() const { return instructions.empty(); }
+
     LmIR* getParent() const { return parent; }
     void printAsOperand(llvm::raw_ostream& out, bool) const;
 };
@@ -115,11 +152,13 @@ public:
 
     Block& addBlock();
     void addEdge(Block& from, Block& to);
-    // Moves the instructions from index on, with the block's terminator
+    // Moves the instructions from at on, with the block's terminator
     // and successors, to a new block. The caller ends the block.
-    Block& splitBlock(Block& block, size_t index);
+    Block& splitBlock(Block& block, Block::iterator at);
     Node& addNode(Block& block, Node::Kind kind, PC pc = -1);
-    Node& insertNode(Block& block, size_t index, Node::Kind kind);
+    // Returns the inserted node's position, as std::vector::insert does.
+    Block::iterator insertNode(Block& block, Block::iterator at,
+                               Node::Kind kind);
     void addOutput(Node& node, Slot slot);
     // Places the phis a changed graph needs and resolves each input to
     // its value. Existing nodes and values keep their IDs.
@@ -134,6 +173,7 @@ public:
     std::vector<Value> values;
 
 private:
+    Node& createNode(Node::Kind kind, PC pc);
     std::vector<PC> buildBlocks();
     void buildNodes(const std::vector<PC>& ends);
     Block::Terminator terminatorAt(PC last) const;
@@ -154,6 +194,22 @@ public:
 private:
     void addFunction(const Proto& proto);
 };
+
+inline Block::iterator Block::begin() {
+    return {parent->nodes, instructions.begin()};
+}
+
+inline Block::iterator Block::end() {
+    return {parent->nodes, instructions.end()};
+}
+
+inline Block::const_iterator Block::begin() const {
+    return {parent->nodes, instructions.begin()};
+}
+
+inline Block::const_iterator Block::end() const {
+    return {parent->nodes, instructions.end()};
+}
 
 } // namespace luamura
 

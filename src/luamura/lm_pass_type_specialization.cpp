@@ -1,27 +1,28 @@
 #include "lm_pass_type_specialization.h"
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallVector.h>
 #include <algorithm>
 
 namespace luamura {
 
 void TypeSpecialization::run(LmIR& ir) {
-    size_t count = ir.blocks.size();
-    std::vector<bool> covered(count, false);
-    for (size_t id = 1; id < count; ++id) {
-        Block& block = *ir.blocks[id];
-        if (covered[id] || block.instructions.empty())
+    // only the blocks from bytecode, as specializing adds more
+    auto blocks =
+        llvm::to_vector(llvm::make_pointer_range(llvm::drop_begin(ir)));
+    Covered covered;
+    for (Block* block : blocks) {
+        if (covered.contains(block) || block->empty())
             continue;
-        OpCode op =
-            GET_OPCODE(ir.nodes[block.instructions.back()].bytecode);
+        OpCode op = GET_OPCODE(block->back().bytecode);
         if (op == OP_ADD || op == OP_ADDI)
-            specialize(ir, block, covered);
+            specialize(ir, *block, covered);
     }
     ir.updateSSA();
-    for (auto& block : ir.blocks) {
-        if (block->terminator != Block::Terminator::Guard)
+    for (Block& block : ir) {
+        if (block.terminator != Block::Terminator::Guard)
             continue;
-        const Node& guard = ir.nodes[block->instructions.back()];
-        for (const Operand& input : guard.inputs)
-            block->successors.front()->types[input.value] = LUA_VNUMINT;
+        for (const Operand& input : block.back().inputs)
+            block.successors.front()->types[input.value] = LUA_VNUMINT;
     }
 }
 
@@ -38,9 +39,9 @@ bool TypeSpecialization::extendsChain(
 }
 
 void TypeSpecialization::specialize(LmIR& ir, Block& block,
-                                    std::vector<bool>& covered) {
-    Node first = ir.nodes[block.instructions.back()];
-    Block& slow = ir.splitBlock(block, block.instructions.size() - 1);
+                                    Covered& covered) {
+    Node first = block.back();
+    Block& slow = ir.splitBlock(block, std::prev(block.end()));
     Block& hot = ir.addBlock();
     ir.addNode(block, Node::Kind::Guard, first.pc).inputs = first.inputs;
     block.terminator = Block::Terminator::Guard;
@@ -55,7 +56,7 @@ void TypeSpecialization::specialize(LmIR& ir, Block& block,
     // Bound duplication while measuring the benefit of longer paths.
     constexpr uint32_t maxOperations = 8;
     for (uint32_t count = 0; count < maxOperations; ++count) {
-        Node original = ir.nodes[source->instructions.back()];
+        Node original = source->back();
         Node& copy = ir.addNode(hot, Node::Kind::Bytecode, original.pc);
         copy.bytecode = original.bytecode;
         copy.inputs = original.inputs;
@@ -63,13 +64,12 @@ void TypeSpecialization::specialize(LmIR& ir, Block& block,
             ir.addOutput(copy, output.slot);
             integers[output.slot] = true;
         }
-        if (source->id < covered.size())
-            covered[source->id] = true;
+        covered.insert(source);
         after = source->successors.front();
-        if (after->instructions.size() != 1 ||
+        if (after->size() != 1 ||
             after->terminator != Block::Terminator::Branch)
             break;
-        const Node& next = ir.nodes[after->instructions.front()];
+        const Node& next = after->front();
         if (next.pc != original.pc + 2 || !extendsChain(next, integers))
             break;
         source = after;

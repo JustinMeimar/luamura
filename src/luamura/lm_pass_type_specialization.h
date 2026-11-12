@@ -2,6 +2,7 @@
 #define LM_PASS_TYPE_SPECIALIZATION_H
 
 #include "lm_pass.h"
+#include <llvm/ADT/SmallPtrSet.h>
 #include <vector>
 
 namespace luamura {
@@ -15,9 +16,12 @@ public:
     void run(LmIR& ir) override;
 
 private:
+    // blocks a specialized chain already copies
+    using Covered = llvm::SmallPtrSet<const Block*, 16>;
+
     bool extendsChain(const Node& node,
                       const std::vector<bool>& integers) const;
-    void specialize(LmIR& ir, Block& block, std::vector<bool>& covered);
+    void specialize(LmIR& ir, Block& block, Covered& covered);
 };
 
 } // namespace luamura

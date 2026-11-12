@@ -135,11 +135,10 @@ void LmIR::addEdge(Block& from, Block& to) {
     to.predecessors.push_back(&from);
 }
 
-Block& LmIR::splitBlock(Block& block, size_t index) {
+Block& LmIR::splitBlock(Block& block, Block::iterator at) {
     Block& rest = addBlock();
-    rest.instructions.assign(block.instructions.begin() + index,
-                             block.instructions.end());
-    block.instructions.resize(index);
+    rest.instructions.assign(at.wrapped(), block.instructions.cend());
+    block.instructions.erase(at.wrapped(), block.instructions.cend());
     rest.terminator = block.terminator;
     rest.successors = std::move(block.successors);
     block.successors.clear();
@@ -168,21 +167,23 @@ Block::Terminator LmIR::terminatorAt(PC last) const {
     }
 }
 
+Node& LmIR::createNode(Node::Kind kind, PC pc) {
+    nodes.push_back({static_cast<uint32_t>(nodes.size()), kind});
+    nodes.back().pc = pc;
+    return nodes.back();
+}
+
 Node& LmIR::addNode(Block& block, Node::Kind kind, PC pc) {
-    uint32_t id = nodes.size();
-    nodes.push_back({id, kind});
-    Node& node = nodes.back();
-    node.pc = pc;
+    Node& node = createNode(kind, pc);
     (kind == Node::Kind::Phi ? block.phis : block.instructions)
-        .push_back(id);
+        .push_back(node.id);
     return node;
 }
 
-Node& LmIR::insertNode(Block& block, size_t index, Node::Kind kind) {
-    Node& node = addNode(block, kind);
-    auto& code = block.instructions;
-    std::rotate(code.begin() + index, code.end() - 1, code.end());
-    return node;
+Block::iterator LmIR::insertNode(Block& block, Block::iterator at,
+                                 Node::Kind kind) {
+    uint32_t id = createNode(kind, -1).id;
+    return {nodes, block.instructions.insert(at.wrapped(), id)};
 }
 
 void LmIR::addOutput(Node& node, Slot slot) {

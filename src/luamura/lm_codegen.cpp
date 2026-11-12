@@ -134,8 +134,8 @@ void CodeGenerator::lower(const Block& block) {
     this->block = &block;
     next = nullptr;
     builder.SetInsertPoint(llvm_blocks[block.id]);
-    for (uint32_t id : block.instructions)
-        lower(block.parent->nodes[id]);
+    for (const Node& node : block)
+        lower(node);
     lowerTerminator(block);
 }
 
@@ -269,11 +269,11 @@ std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
     passes.add(std::make_unique<TypeSpecialization>());
     passes.add(std::make_unique<BaseUpdates>());
     passes.run(ir);
-    for (size_t index = 0; index < ir.functions.size(); ++index) {
+    for (auto [index, function] : llvm::enumerate(ir.functions)) {
         if (std::getenv("LUAMURA_DUMP_IR"))
-            ir.functions[index]->print(llvm::errs());
+            function->print(llvm::errs());
         if (std::getenv("LUAMURA_DUMP_DOT"))
-            writeGraph(*ir.functions[index], lmFunctionName(index));
+            writeGraph(*function, lmFunctionName(index));
     }
     auto module = std::make_unique<llvm::Module>("luamura", context);
     CodeGenerator(*module, bytecode).lower(ir);
