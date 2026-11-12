@@ -2,7 +2,6 @@
 #define LM_CODEGEN_H
 
 #include "lm_ir.h"
-#include "lm_lower.h"
 #include "lm_lua.h"
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -13,7 +12,7 @@
 
 namespace luamura {
 
-// Compiles a chunk's functions with the baseline backend.
+// Compiles a chunk's functions to native code.
 std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
                                             const Proto& main,
                                             const GuestBytecode& bytecode);
@@ -28,25 +27,22 @@ struct Frame {
     llvm::Value* base = nullptr;
 };
 
-// The baseline backend. Each function becomes a native function whose
-// control flow mirrors its IR, running each bytecode with lvm.c's
-// function for it.
-class BaselineLowerer : public LmIRLowerer {
+// Each function becomes a native function whose control flow mirrors
+// its IR, running each bytecode with lvm.c's function for it.
+class CodeGenerator {
 public:
-    BaselineLowerer(llvm::Module& module, const GuestBytecode& bytecode);
+    CodeGenerator(llvm::Module& module, const GuestBytecode& bytecode);
 
-    using LmIRLowerer::lower;
     // Also defines what the runtime loads.
-    void lower(const LmModule& module) override;
-    void lower(const LmIR& ir) override;
-    void lower(const Block& block) override;
+    void lower(const LmModule& module);
 
 private:
-    void lowerFrameRead(const Node& node) override;
-    void lowerPhi(const Node& node) override;
-    void lowerBytecode(const Node& node) override;
-    void lowerGuard(const Node& node) override;
-    void lowerTerminator(const Block& block) override;
+    void lower(const LmIR& ir);
+    void lower(const Block& block);
+    void lower(const Node& node);
+    void lowerBytecode(const Node& node);
+    void lowerGuard(const Node& node);
+    void lowerTerminator(const Block& block);
 
     llvm::Value* projectOpHandler(const Node& node);
     llvm::Value* slotAddress(Slot slot, size_t field);

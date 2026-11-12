@@ -30,7 +30,7 @@
  *
  * To natively compile Lua, each function is a module is lexed, parsed and
  * lowered into bytecode. A control-flow-graph (CFG) is constructed from the
- * instructions in each function. The Baseline compiler receives the CFG and
+ * instructions in each function. The code generator receives the CFG and
  * iterates over its blocks. For each bytecode instruction within a block, the
  * IR builder emits a call to the respective op-handler function, marked with
  * the always-inline attribute. A straight-line sequence of Lua bytecode then

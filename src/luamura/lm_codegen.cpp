@@ -13,8 +13,8 @@ extern "C" {
 
 namespace luamura {
 
-BaselineLowerer::BaselineLowerer(llvm::Module& module,
-                                 const GuestBytecode& bytecode)
+CodeGenerator::CodeGenerator(llvm::Module& module,
+                             const GuestBytecode& bytecode)
     : module(module), context(module.getContext()), builder(context),
       bytecode(bytecode), ptr_ty(builder.getPtrTy()),
       i8_ty(builder.getInt8Ty()), i32_ty(builder.getInt32Ty()),
@@ -30,11 +30,7 @@ BaselineLowerer::BaselineLowerer(llvm::Module& module,
       lm_compiled(module.getOrInsertFunction("lm_compiled", ptr_ty, ptr_ty,
                                              ptr_ty)) {}
 
-// values live in the Lua stack, which needs no reading
-void BaselineLowerer::lowerFrameRead(const Node&) {}
-void BaselineLowerer::lowerPhi(const Node&) {}
-
-void BaselineLowerer::lowerBytecode(const Node& node) {
+void CodeGenerator::lowerBytecode(const Node& node) {
     next = projectOpHandler(node);
     OpCode op = GET_OPCODE(node.bytecode);
     if (op == OP_CALL || op == OP_TAILCALL || op == OP_RETURN ||
@@ -44,7 +40,7 @@ void BaselineLowerer::lowerBytecode(const Node& node) {
         refreshBase();
 }
 
-void BaselineLowerer::refreshBase() {
+void CodeGenerator::refreshBase() {
     auto* func = builder.CreateLoad(
         ptr_ty, builder.CreateInBoundsPtrAdd(
                     frame.ci, builder.getInt64(offsetof(CallInfo, func))));
@@ -53,14 +49,14 @@ void BaselineLowerer::refreshBase() {
                         frame.base);
 }
 
-llvm::Value* BaselineLowerer::slotAddress(Slot slot, size_t field) {
+llvm::Value* CodeGenerator::slotAddress(Slot slot, size_t field) {
     return builder.CreateInBoundsPtrAdd(
         builder.CreateLoad(ptr_ty, frame.base),
         builder.getInt64(slot * sizeof(StackValue) + field));
 }
 
 // Holds when each input has the type the hot path assumes.
-void BaselineLowerer::lowerGuard(const Node& node) {
+void CodeGenerator::lowerGuard(const Node& node) {
     const Block& hot = *block->successors.front();
     llvm::Value* holds = builder.getTrue();
     for (const Operand& op : node.inputs) {
@@ -73,7 +69,7 @@ void BaselineLowerer::lowerGuard(const Node& node) {
     next = holds;
 }
 
-llvm::Value* BaselineLowerer::projectOpHandler(const Node& node) {
+llvm::Value* CodeGenerator::projectOpHandler(const Node& node) {
     PC pc = node.pc;
     Instruction i = node.bytecode;
     // the jump after i, if i is a test
@@ -92,7 +88,7 @@ llvm::Value* BaselineLowerer::projectOpHandler(const Node& node) {
     return call;
 }
 
-llvm::BasicBlock* BaselineLowerer::createBlock(const llvm::Twine& name) {
+llvm::BasicBlock* CodeGenerator::createBlock(const llvm::Twine& name) {
     return llvm::BasicBlock::Create(context, name, function);
 }
 
@@ -101,8 +97,9 @@ static std::string lmFunctionName(size_t index) {
     return "lm_function_" + std::to_string(index);
 }
 
-void BaselineLowerer::lower(const LmModule& module) {
-    LmIRLowerer::lower(module);
+void CodeGenerator::lower(const LmModule& module) {
+    for (const auto& ir : module.functions)
+        lower(*ir);
     define("lm_chunk",
            llvm::ConstantDataArray::get(context, llvm::ArrayRef(bytecode)));
     define("lm_chunk_size", builder.getInt64(bytecode.size()));
@@ -112,7 +109,7 @@ void BaselineLowerer::lower(const LmModule& module) {
     define("lm_nfunctions", builder.getInt32(functions.size()));
 }
 
-void BaselineLowerer::lower(const LmIR& ir) {
+void CodeGenerator::lower(const LmIR& ir) {
     proto = &ir.proto;
     function = llvm::Function::Create(
         aot_function_ty, llvm::GlobalValue::InternalLinkage,
@@ -133,18 +130,34 @@ void BaselineLowerer::lower(const LmIR& ir) {
     builder.SetInsertPoint(llvm_blocks.front());
     enter();
 
-    LmIRLowerer::lower(ir);
+    for (const auto& block : ir.blocks)
+        lower(*block);
     functions.push_back(function);
 }
 
-void BaselineLowerer::lower(const Block& block) {
+void CodeGenerator::lower(const Block& block) {
     this->block = &block;
     next = nullptr;
     builder.SetInsertPoint(llvm_blocks[block.id]);
-    LmIRLowerer::lower(block);
+    for (uint32_t id : block.instructions)
+        lower(block.parent->nodes[id]);
+    lowerTerminator(block);
 }
 
-void BaselineLowerer::enter() {
+void CodeGenerator::lower(const Node& node) {
+    switch (node.kind) {
+    // values live in the Lua stack, which needs no reading
+    case Node::Kind::FrameRead:
+    case Node::Kind::Phi:
+        return;
+    case Node::Kind::Bytecode:
+        return lowerBytecode(node);
+    case Node::Kind::Guard:
+        return lowerGuard(node);
+    }
+}
+
+void CodeGenerator::enter() {
     frame.pc = builder.CreateAlloca(ptr_ty);
     frame.base = builder.CreateAlloca(ptr_ty);
     frame.code = builder.CreateCall(lm_code, {frame.ci});
@@ -152,7 +165,7 @@ void BaselineLowerer::enter() {
 }
 
 // Continues at the saved pc: the function's start, or after a call.
-void BaselineLowerer::resume(const Block& block) {
+void CodeGenerator::resume(const Block& block) {
     auto* saved = builder.CreateCall(lm_resume, {frame.ci});
     auto* to = builder.CreateSwitch(saved, interpret);
     for (const Block* target : block.successors)
@@ -162,7 +175,7 @@ void BaselineLowerer::resume(const Block& block) {
 
 // Continues where the interpreter would after the block's last
 // instruction, which returned next.
-void BaselineLowerer::lowerTerminator(const Block& block) {
+void CodeGenerator::lowerTerminator(const Block& block) {
     switch (block.terminator) {
     case Block::Terminator::Resume:
         return resume(block);
@@ -183,7 +196,7 @@ void BaselineLowerer::lowerTerminator(const Block& block) {
 }
 
 // The instruction left in pc which successor to continue at.
-void BaselineLowerer::toSuccessors(const Block& block) {
+void CodeGenerator::toSuccessors(const Block& block) {
     const std::vector<Block*>& targets = block.successors;
     if (targets.size() == 1) {
         builder.CreateBr(llvm_blocks[targets.front()->id]);
@@ -201,7 +214,7 @@ void BaselineLowerer::toSuccessors(const Block& block) {
 // A Lua callee is left for luaV_execute to run. A C function returned
 // here, and may have set a hook, such as with debug.sethook, which only
 // the interpreter runs.
-void BaselineLowerer::afterCall(llvm::BasicBlock* successor) {
+void CodeGenerator::afterCall(llvm::BasicBlock* successor) {
     returnIf(builder.CreateIsNotNull(next), next);
     refreshBase();
     // volatile, as signal handlers set it
@@ -216,7 +229,7 @@ void BaselineLowerer::afterCall(llvm::BasicBlock* successor) {
 
 // A Lua callee replaces this function in ci. Entering its native code
 // as a tail call keeps the C stack from growing.
-void BaselineLowerer::tailCall() {
+void CodeGenerator::tailCall() {
     returnIf(builder.CreateICmpNE(next, frame.ci), next);
     auto* native = builder.CreateCall(lm_compiled, {frame.L, frame.ci});
     returnIf(builder.CreateIsNull(native), next);
@@ -226,7 +239,7 @@ void BaselineLowerer::tailCall() {
     builder.CreateRet(call);
 }
 
-void BaselineLowerer::returnIf(llvm::Value* condition, llvm::Value* value) {
+void CodeGenerator::returnIf(llvm::Value* condition, llvm::Value* value) {
     auto* returns = createBlock();
     auto* continues = createBlock();
     builder.CreateCondBr(condition, returns, continues);
@@ -235,7 +248,7 @@ void BaselineLowerer::returnIf(llvm::Value* condition, llvm::Value* value) {
     builder.SetInsertPoint(continues);
 }
 
-void BaselineLowerer::define(const char* name, llvm::Constant* value) {
+void CodeGenerator::define(const char* name, llvm::Constant* value) {
     new llvm::GlobalVariable(module, value->getType(), true,
                              llvm::GlobalValue::ExternalLinkage, value,
                              name);
@@ -267,7 +280,7 @@ std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
             writeGraph(*ir.functions[index], lmFunctionName(index));
     }
     auto module = std::make_unique<llvm::Module>("luamura", context);
-    BaselineLowerer(*module, bytecode).lower(ir);
+    CodeGenerator(*module, bytecode).lower(ir);
     return module;
 }
 
