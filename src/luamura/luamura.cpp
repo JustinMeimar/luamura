@@ -49,6 +49,9 @@ namespace luamura {
 
 #define LUAMURA_PRECOMP alignas(4) static const uint8_t
 
+/// Contains generic VM function handlers and table operators compiled
+/// into LLVM bitcode, making them visible as functions for LLVM to call
+/// and inline into the native executable.
 LUAMURA_PRECOMP lvm_bitcode[] = {
 #embed "lvm.bc"
 };

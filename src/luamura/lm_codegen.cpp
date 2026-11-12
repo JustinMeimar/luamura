@@ -1,11 +1,9 @@
 #include "lm_codegen.h"
 #include "lm_hot_paths.h"
 #include "lm_pass.h"
-
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
-
 #include <string>
 #include <cstdlib>
 
@@ -20,7 +18,7 @@ BaselineLowerer::BaselineLowerer(llvm::Module& module,
     : module(module), context(module.getContext()), builder(context),
       bytecode(bytecode), ptr_ty(builder.getPtrTy()),
       i8_ty(builder.getInt8Ty()), i32_ty(builder.getInt32Ty()),
-      i64_ty(builder.getInt64Ty()), instruction_ty(builder.getInt32Ty()),
+      instruction_ty(builder.getInt32Ty()),
       aot_function_ty(
           llvm::FunctionType::get(ptr_ty, {ptr_ty, ptr_ty}, false)),
       op_handler_ty(llvm::FunctionType::get(
@@ -36,8 +34,6 @@ void BaselineLowerer::lowerFrameRead(const Node&) {}
 void BaselineLowerer::lowerPhi(const Node&) {}
 
 void BaselineLowerer::lowerBytecode(const Node& node) {
-    if (isIntegerAdd(node))
-        return lowerIntegerAdd(node);
     next = projectOpHandler(node);
 }
 
@@ -49,11 +45,6 @@ llvm::Value* BaselineLowerer::slotAddress(Slot slot, size_t field) {
                     frame.ci, builder.getInt64(offsetof(CallInfo, func))));
     return builder.CreateInBoundsPtrAdd(
         func, builder.getInt64((slot + 1) * sizeof(StackValue) + field));
-}
-
-llvm::Value* BaselineLowerer::loadInteger(Slot slot) {
-    return builder.CreateLoad(i64_ty,
-                              slotAddress(slot, offsetof(TValue, value_)));
 }
 
 // Holds when each input has the type the hot path assumes.
@@ -68,29 +59,6 @@ void BaselineLowerer::lowerGuard(const Node& node) {
                        tag, builder.getInt8(hot.types.lookup(op.value))));
     }
     next = holds;
-}
-
-bool BaselineLowerer::isIntegerAdd(const Node& node) const {
-    OpCode op = GET_OPCODE(node.bytecode);
-    if (op != OP_ADD && op != OP_ADDI)
-        return false;
-    return llvm::all_of(node.inputs, [&](const Operand& in) {
-        return block->types.lookup(in.value) == LUA_VNUMINT;
-    });
-}
-
-// Lua's integers wrap around, as LLVM's add does.
-void BaselineLowerer::lowerIntegerAdd(const Node& node) {
-    Instruction i = node.bytecode;
-    llvm::Value* left = loadInteger(GETARG_B(i));
-    llvm::Value* right = GET_OPCODE(i) == OP_ADDI
-                             ? builder.getInt64(GETARG_sC(i))
-                             : loadInteger(GETARG_C(i));
-    Slot a = GETARG_A(i);
-    builder.CreateStore(builder.CreateAdd(left, right),
-                        slotAddress(a, offsetof(TValue, value_)));
-    builder.CreateStore(builder.getInt8(LUA_VNUMINT),
-                        slotAddress(a, offsetof(TValue, tt_)));
 }
 
 llvm::Value* BaselineLowerer::projectOpHandler(const Node& node) {

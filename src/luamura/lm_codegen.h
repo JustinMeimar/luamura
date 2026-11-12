@@ -4,11 +4,9 @@
 #include "lm_ir.h"
 #include "lm_lower.h"
 #include "lm_lua.h"
-
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,11 +47,8 @@ private:
     void lowerGuard(const Node& node) override;
     void lowerTerminator(const Block& block) override;
 
-    bool isIntegerAdd(const Node& node) const;
-    void lowerIntegerAdd(const Node& node);
     llvm::Value* projectOpHandler(const Node& node);
     llvm::Value* slotAddress(Slot slot, size_t field);
-    llvm::Value* loadInteger(Slot slot);
     void enter();
     void resume(const Block& block);
     void toSuccessors(const Block& block);
@@ -71,7 +66,6 @@ private:
     llvm::PointerType* ptr_ty;
     llvm::IntegerType* i8_ty;
     llvm::IntegerType* i32_ty;
-    llvm::IntegerType* i64_ty;
     llvm::IntegerType* instruction_ty;
     // lua_AotFunction
     llvm::FunctionType* aot_function_ty;
