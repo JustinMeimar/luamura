@@ -17,19 +17,7 @@ namespace luamura {
 CodeGenerator::CodeGenerator(llvm::Module& module,
                              const GuestBytecode& bytecode)
     : module(module), context(module.getContext()), builder(context),
-      bytecode(bytecode), ptr_ty(builder.getPtrTy()),
-      i8_ty(builder.getInt8Ty()), i32_ty(builder.getInt32Ty()),
-      instruction_ty(builder.getInt32Ty()),
-      aot_function_ty(
-          llvm::FunctionType::get(ptr_ty, {ptr_ty, ptr_ty}, false)),
-      op_handler_ty(llvm::FunctionType::get(
-          ptr_ty,
-          {ptr_ty, ptr_ty, ptr_ty, instruction_ty, instruction_ty, ptr_ty},
-          false)),
-      lm_code(module.getOrInsertFunction("lm_code", ptr_ty, ptr_ty)),
-      lm_resume(module.getOrInsertFunction("lm_resume", i32_ty, ptr_ty)),
-      lm_compiled(module.getOrInsertFunction("lm_compiled", ptr_ty, ptr_ty,
-                                             ptr_ty)) {}
+      bytecode(bytecode), types(context), runtime(module, types) {}
 
 void CodeGenerator::lowerBytecode(const Node& node) {
     next = projectOpHandler(node);
@@ -37,8 +25,9 @@ void CodeGenerator::lowerBytecode(const Node& node) {
 
 void CodeGenerator::updateBase() {
     auto* func = builder.CreateLoad(
-        ptr_ty, builder.CreateInBoundsPtrAdd(
-                    frame.ci, builder.getInt64(offsetof(CallInfo, func))));
+        types.ptr,
+        builder.CreateInBoundsPtrAdd(
+            frame.ci, builder.getInt64(offsetof(CallInfo, func))));
     builder.CreateStore(builder.CreateInBoundsPtrAdd(
                             func, builder.getInt64(sizeof(StackValue))),
                         frame.base);
@@ -46,7 +35,7 @@ void CodeGenerator::updateBase() {
 
 llvm::Value* CodeGenerator::slotAddress(Slot slot, size_t field) {
     return builder.CreateInBoundsPtrAdd(
-        builder.CreateLoad(ptr_ty, frame.base),
+        builder.CreateLoad(types.ptr, frame.base),
         builder.getInt64(slot * sizeof(StackValue) + field));
 }
 
@@ -56,7 +45,7 @@ void CodeGenerator::lowerGuard(const Node& node) {
     llvm::Value* holds = builder.getTrue();
     for (const Operand& op : node.inputs) {
         auto* tag = builder.CreateLoad(
-            i8_ty, slotAddress(op.slot, offsetof(TValue, tt_)));
+            types.i8, slotAddress(op.slot, offsetof(TValue, tt_)));
         holds = builder.CreateAnd(
             holds, builder.CreateICmpEQ(
                        tag, builder.getInt8(hot.types.lookup(op.value))));
@@ -71,14 +60,14 @@ llvm::Value* CodeGenerator::projectOpHandler(const Node& node) {
     Instruction ni = pc + 1 < proto->sizecode ? proto->code[pc + 1] : 0;
     // the interpreter's pc after fetching i
     builder.CreateStore(builder.CreateConstInBoundsGEP1_32(
-                            instruction_ty, frame.code, pc + 1),
+                            types.instruction, frame.code, pc + 1),
                         frame.pc);
     auto* call = builder.CreateCall(
         module.getOrInsertFunction(std::string("luaV_OP_") +
                                        opnames[GET_OPCODE(i)] + "_base",
-                                   op_handler_ty),
+                                   types.op_handler),
         {frame.L, frame.ci, frame.pc, builder.getInt32(i),
-         builder.getInt32(ni), builder.CreateLoad(ptr_ty, frame.base)});
+         builder.getInt32(ni), builder.CreateLoad(types.ptr, frame.base)});
     call->addFnAttr(llvm::Attribute::AlwaysInline);
     return call;
 }
@@ -98,16 +87,17 @@ void CodeGenerator::lower(const LmModule& module) {
     define("lm_chunk",
            llvm::ConstantDataArray::get(context, llvm::ArrayRef(bytecode)));
     define("lm_chunk_size", builder.getInt64(bytecode.size()));
-    define("lm_functions",
-           llvm::ConstantArray::get(
-               llvm::ArrayType::get(ptr_ty, functions.size()), functions));
+    define(
+        "lm_functions",
+        llvm::ConstantArray::get(
+            llvm::ArrayType::get(types.ptr, functions.size()), functions));
     define("lm_nfunctions", builder.getInt32(functions.size()));
 }
 
 void CodeGenerator::lower(const LmIR& ir) {
     proto = &ir.proto;
     function = llvm::Function::Create(
-        aot_function_ty, llvm::GlobalValue::InternalLinkage,
+        types.aot_function, llvm::GlobalValue::InternalLinkage,
         lmFunctionName(functions.size()), module);
     frame = {function->getArg(0), function->getArg(1)};
 
@@ -155,14 +145,14 @@ void CodeGenerator::lower(const Node& node) {
 }
 
 void CodeGenerator::enter() {
-    frame.pc = builder.CreateAlloca(ptr_ty);
-    frame.base = builder.CreateAlloca(ptr_ty);
-    frame.code = builder.CreateCall(lm_code, {frame.ci});
+    frame.pc = builder.CreateAlloca(types.ptr);
+    frame.base = builder.CreateAlloca(types.ptr);
+    frame.code = builder.CreateCall(runtime.lm_code, {frame.ci});
 }
 
 // Continues at the saved pc: the function's start, or after a call.
 void CodeGenerator::resume(const Block& block) {
-    auto* saved = builder.CreateCall(lm_resume, {frame.ci});
+    auto* saved = builder.CreateCall(runtime.lm_resume, {frame.ci});
     auto* to = builder.CreateSwitch(saved, interpret);
     for (const Block* target : block.successors)
         to->addCase(builder.getInt32(target->start),
@@ -199,7 +189,8 @@ void CodeGenerator::toSuccessors(const Block& block) {
         return;
     }
     auto* moved = builder.CreatePtrDiff(
-        instruction_ty, builder.CreateLoad(ptr_ty, frame.pc), frame.code);
+        types.instruction, builder.CreateLoad(types.ptr, frame.pc),
+        frame.code);
     auto* to =
         builder.CreateSwitch(moved, llvm_blocks[targets.front()->id]);
     for (const Block* target : llvm::drop_begin(targets))
@@ -214,7 +205,7 @@ void CodeGenerator::afterCall(llvm::BasicBlock* successor) {
     returnIf(builder.CreateIsNotNull(next), next);
     // volatile, as signal handlers set it
     auto* hookmask = builder.CreateLoad(
-        i32_ty,
+        types.i32,
         builder.CreateInBoundsPtrAdd(
             frame.L, builder.getInt64(offsetof(lua_State, hookmask))),
         true);
@@ -226,10 +217,11 @@ void CodeGenerator::afterCall(llvm::BasicBlock* successor) {
 // as a tail call keeps the C stack from growing.
 void CodeGenerator::tailCall() {
     returnIf(builder.CreateICmpNE(next, frame.ci), next);
-    auto* native = builder.CreateCall(lm_compiled, {frame.L, frame.ci});
+    auto* native =
+        builder.CreateCall(runtime.lm_compiled, {frame.L, frame.ci});
     returnIf(builder.CreateIsNull(native), next);
     auto* call =
-        builder.CreateCall(aot_function_ty, native, {frame.L, frame.ci});
+        builder.CreateCall(types.aot_function, native, {frame.L, frame.ci});
     call->setTailCallKind(llvm::CallInst::TCK_MustTail);
     builder.CreateRet(call);
 }

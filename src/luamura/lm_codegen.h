@@ -3,6 +3,7 @@
 
 #include "lm_ir.h"
 #include "lm_lua.h"
+#include "lm_runtime.h"
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -61,19 +62,8 @@ private:
     llvm::IRBuilder<> builder;
     const GuestBytecode& bytecode;
 
-    llvm::PointerType* ptr_ty;
-    llvm::IntegerType* i8_ty;
-    llvm::IntegerType* i32_ty;
-    llvm::IntegerType* instruction_ty;
-    // lua_AotFunction
-    llvm::FunctionType* aot_function_ty;
-    // lvm.c's function for an instruction
-    llvm::FunctionType* op_handler_ty;
-
-    // the runtime functions compiled code calls
-    llvm::FunctionCallee lm_code;
-    llvm::FunctionCallee lm_resume;
-    llvm::FunctionCallee lm_compiled;
+    RuntimeTypes types;
+    RuntimeFunctions runtime;
 
     std::vector<llvm::Constant*> functions;
 
