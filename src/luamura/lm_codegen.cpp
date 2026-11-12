@@ -1,4 +1,5 @@
 #include "lm_codegen.h"
+#include "lm_base_updates.h"
 #include "lm_hot_paths.h"
 #include "lm_pass.h"
 #include <llvm/ADT/STLExtras.h>
@@ -32,15 +33,9 @@ CodeGenerator::CodeGenerator(llvm::Module& module,
 
 void CodeGenerator::lowerBytecode(const Node& node) {
     next = projectOpHandler(node);
-    OpCode op = GET_OPCODE(node.bytecode);
-    if (op == OP_CALL || op == OP_TAILCALL || op == OP_RETURN ||
-        op == OP_RETURN0 || op == OP_RETURN1)
-        return;
-    if (node.effects != Node::Effects::Frame)
-        refreshBase();
 }
 
-void CodeGenerator::refreshBase() {
+void CodeGenerator::updateBase() {
     auto* func = builder.CreateLoad(
         ptr_ty, builder.CreateInBoundsPtrAdd(
                     frame.ci, builder.getInt64(offsetof(CallInfo, func))));
@@ -154,6 +149,8 @@ void CodeGenerator::lower(const Node& node) {
         return lowerBytecode(node);
     case Node::Kind::Guard:
         return lowerGuard(node);
+    case Node::Kind::UpdateBase:
+        return updateBase();
     }
 }
 
@@ -161,7 +158,6 @@ void CodeGenerator::enter() {
     frame.pc = builder.CreateAlloca(ptr_ty);
     frame.base = builder.CreateAlloca(ptr_ty);
     frame.code = builder.CreateCall(lm_code, {frame.ci});
-    refreshBase();
 }
 
 // Continues at the saved pc: the function's start, or after a call.
@@ -216,7 +212,6 @@ void CodeGenerator::toSuccessors(const Block& block) {
 // the interpreter runs.
 void CodeGenerator::afterCall(llvm::BasicBlock* successor) {
     returnIf(builder.CreateIsNotNull(next), next);
-    refreshBase();
     // volatile, as signal handlers set it
     auto* hookmask = builder.CreateLoad(
         i32_ty,
@@ -272,6 +267,7 @@ std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
     LmModule ir(main);
     PassManager passes;
     passes.add(addIntegerHotPaths);
+    passes.add(addBaseUpdates);
     passes.run(ir);
     for (size_t index = 0; index < ir.functions.size(); ++index) {
         if (std::getenv("LUAMURA_DUMP_IR"))

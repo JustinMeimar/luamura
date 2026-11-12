@@ -46,7 +46,7 @@ private:
 
     llvm::Value* projectOpHandler(const Node& node);
     llvm::Value* slotAddress(Slot slot, size_t field);
-    void refreshBase();
+    void updateBase();
     void enter();
     void resume(const Block& block);
     void toSuccessors(const Block& block);

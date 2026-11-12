@@ -178,6 +178,13 @@ Node& LmIR::addNode(Block& block, Node::Kind kind, PC pc) {
     return node;
 }
 
+Node& LmIR::insertNode(Block& block, size_t index, Node::Kind kind) {
+    Node& node = addNode(block, kind);
+    auto& code = block.instructions;
+    std::rotate(code.begin() + index, code.end() - 1, code.end());
+    return node;
+}
+
 void LmIR::addOutput(Node& node, Slot slot) {
     node.outputs.push_back({slot, static_cast<ValueID>(values.size())});
     values.push_back({node.id, slot});
@@ -330,6 +337,9 @@ void LmIR::printBlock(llvm::raw_ostream& out, const Block& block) const {
             break;
         case Node::Kind::Guard:
             out << "guard";
+            break;
+        case Node::Kind::UpdateBase:
+            out << "update_base";
             break;
         }
         for (const Operand& op : node.inputs)

@@ -41,6 +41,8 @@ struct Node {
         // tests that its inputs have the types its first successor
         // assumes, and ends its block
         Guard,
+        // reloads the frame's base, which the stack moves with
+        UpdateBase,
     };
     // Each effect implies the ones before it.
     enum class Effects {
@@ -117,6 +119,7 @@ public:
     // and successors, to a new block. The caller ends the block.
     Block& splitBlock(Block& block, size_t index);
     Node& addNode(Block& block, Node::Kind kind, PC pc = -1);
+    Node& insertNode(Block& block, size_t index, Node::Kind kind);
     void addOutput(Node& node, Slot slot);
     // Places the phis a changed graph needs and resolves each input to
     // its value. Existing nodes and values keep their IDs.
