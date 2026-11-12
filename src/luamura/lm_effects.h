@@ -8,8 +8,8 @@
 namespace luamura {
 
 // The frame slots each bytecode instruction reads and writes, and
-// whether it can run Lua code. Lowering still runs each instruction's
-// handler, so the model describes the handlers in lvmops.h.
+// whether it can move the frame or run Lua code. Lowering still runs each
+// instruction's handler, so the model describes the handlers in lvmops.h.
 class EffectModel {
 public:
     explicit EffectModel(LmIR& ir);
@@ -25,6 +25,7 @@ private:
     void write(Slot slot);
     void readRange(Slot from, Slot to);
     void writeRange(Slot from, Slot to);
+    void movesBase();
     void runsLua();
     Slot upTo(uint32_t count, Slot end) const;
 

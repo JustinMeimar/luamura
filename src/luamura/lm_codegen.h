@@ -50,7 +50,6 @@ private:
 
     llvm::Value* projectOpHandler(const Node& node);
     llvm::Value* slotAddress(Slot slot, size_t field);
-    bool preservesBase(const Node& node) const;
     void refreshBase();
     void enter();
     void resume(const Block& block);

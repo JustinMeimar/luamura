@@ -56,6 +56,10 @@ void EffectModel::writeRange(Slot from, Slot to) {
         write(slot);
 }
 
+void EffectModel::movesBase() {
+    node->effects = std::max(node->effects, Node::Effects::MovesBase);
+}
+
 // Metamethods, __close, finalizers run by the GC and callees are Lua
 // code, which can reach captured slots.
 void EffectModel::runsLua() {
@@ -233,6 +237,7 @@ void EffectModel::model(Node& node) {
         if (TESTARG_k(i))
             read(b);
         writeRange(a, upTo(c, a + c - 1));
+        movesBase();
         break;
     default:
         readRange(0, top);

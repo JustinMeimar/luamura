@@ -42,7 +42,13 @@ struct Node {
         // assumes, and ends its block
         Guard,
     };
-    enum class Effects { Frame, Runtime };
+    // Each effect implies the ones before it.
+    enum class Effects {
+        Frame,
+        // reallocates the Lua stack, so the frame's base moves
+        MovesBase,
+        Runtime,
+    };
 
     uint32_t id;
     Kind kind;

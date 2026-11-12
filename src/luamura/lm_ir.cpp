@@ -334,6 +334,8 @@ void LmIR::printBlock(llvm::raw_ostream& out, const Block& block) const {
         }
         for (const Operand& op : node.inputs)
             out << " %" << op.value << "[R" << op.slot << "]";
+        if (node.effects == Node::Effects::MovesBase)
+            out << " [moves base]";
         if (node.effects == Node::Effects::Runtime)
             out << " [runtime]";
         out << "\n";

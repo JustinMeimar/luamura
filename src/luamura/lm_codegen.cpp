@@ -40,34 +40,8 @@ void BaselineLowerer::lowerBytecode(const Node& node) {
     if (op == OP_CALL || op == OP_TAILCALL || op == OP_RETURN ||
         op == OP_RETURN0 || op == OP_RETURN1)
         return;
-    if (!preservesBase(node))
+    if (node.effects != Node::Effects::Frame)
         refreshBase();
-}
-
-// Start conservatively: other handlers may relocate or adjust the frame.
-bool BaselineLowerer::preservesBase(const Node& node) const {
-    switch (GET_OPCODE(node.bytecode)) {
-    case OP_MOVE:
-    case OP_LOADI:
-    case OP_LOADF:
-    case OP_LOADK:
-    case OP_LOADKX:
-    case OP_LOADFALSE:
-    case OP_LFALSESKIP:
-    case OP_LOADTRUE:
-    case OP_LOADNIL:
-    case OP_ADDI:
-    case OP_ADDK:
-    case OP_SUBK:
-    case OP_MULK:
-    case OP_ADD:
-    case OP_SUB:
-    case OP_MUL:
-    case OP_JMP:
-        return true;
-    default:
-        return false;
-    }
 }
 
 void BaselineLowerer::refreshBase() {
