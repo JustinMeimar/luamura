@@ -7,19 +7,20 @@
 
 namespace luamura {
 
+// A pass over one function's LmIR.
+using LmIRPass = void (*)(LmIR&);
+
 class PassManager {
 public:
-    using Pass = void (*)(LmIR&);
-
-    void add(Pass pass) { passes.push_back(pass); }
+    void add(LmIRPass pass) { passes.push_back(pass); }
     void run(LmModule& module) const {
         for (auto& ir : module.functions)
-            for (Pass pass : passes)
+            for (LmIRPass pass : passes)
                 pass(*ir);
     }
 
 private:
-    std::vector<Pass> passes;
+    std::vector<LmIRPass> passes;
 };
 
 } // namespace luamura

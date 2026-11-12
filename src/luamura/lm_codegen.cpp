@@ -1,6 +1,6 @@
 #include "lm_codegen.h"
-#include "lm_base_updates.h"
-#include "lm_hot_paths.h"
+#include "lm_pass_base_updates.h"
+#include "lm_pass_integer_specialization.h"
 #include "lm_pass.h"
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/Constants.h>
@@ -266,7 +266,7 @@ std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
                                             const GuestBytecode& bytecode) {
     LmModule ir(main);
     PassManager passes;
-    passes.add(addIntegerHotPaths);
+    passes.add(specializeIntegerArithmetic);
     passes.add(addBaseUpdates);
     passes.run(ir);
     for (size_t index = 0; index < ir.functions.size(); ++index) {

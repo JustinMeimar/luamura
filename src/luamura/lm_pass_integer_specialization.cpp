@@ -1,4 +1,4 @@
-#include "lm_hot_paths.h"
+#include "lm_pass_integer_specialization.h"
 #include <algorithm>
 #include <vector>
 
@@ -6,9 +6,9 @@ namespace luamura {
 
 namespace {
 
-class AddIntegerHotPaths {
+class IntegerSpecialization {
 public:
-    explicit AddIntegerHotPaths(LmIR& ir) : ir(ir) {}
+    explicit IntegerSpecialization(LmIR& ir) : ir(ir) {}
 
     void run() {
         size_t count = ir.blocks.size();
@@ -20,7 +20,7 @@ public:
             OpCode op =
                 GET_OPCODE(ir.nodes[block.instructions.back()].bytecode);
             if (op == OP_ADD || op == OP_ADDI)
-                addHotPath(block, covered);
+                specialize(block, covered);
         }
         ir.updateSSA();
         for (auto& block : ir.blocks) {
@@ -45,7 +45,7 @@ private:
             [&](const Operand& input) { return integers[input.slot]; });
     }
 
-    void addHotPath(Block& block, std::vector<bool>& covered) {
+    void specialize(Block& block, std::vector<bool>& covered) {
         Node first = ir.nodes[block.instructions.back()];
         Block& slow = ir.splitBlock(block, block.instructions.size() - 1);
         Block& hot = ir.addBlock();
@@ -90,6 +90,8 @@ private:
 
 } // namespace
 
-void addIntegerHotPaths(LmIR& ir) { AddIntegerHotPaths(ir).run(); }
+void specializeIntegerArithmetic(LmIR& ir) {
+    IntegerSpecialization(ir).run();
+}
 
 } // namespace luamura

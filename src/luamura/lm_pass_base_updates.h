@@ -1,5 +1,5 @@
-#ifndef LM_BASE_UPDATES_H
-#define LM_BASE_UPDATES_H
+#ifndef LM_PASS_BASE_UPDATES_H
+#define LM_PASS_BASE_UPDATES_H
 
 #include "lm_ir.h"
 
@@ -11,4 +11,4 @@ void addBaseUpdates(LmIR& ir);
 
 } // namespace luamura
 
-#endif // LM_BASE_UPDATES_H
+#endif // LM_PASS_BASE_UPDATES_H
