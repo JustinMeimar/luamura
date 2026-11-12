@@ -4,6 +4,7 @@
 #include "lm_ir.h"
 #include "lm_lua.h"
 #include "lm_runtime.h"
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -17,6 +18,9 @@ namespace luamura {
 std::unique_ptr<llvm::Module> compileModule(llvm::LLVMContext& context,
                                             const Proto& main,
                                             const GuestBytecode& bytecode);
+
+// the offset of a field within a TValue, as offsetof gives it
+using FieldOffset = size_t;
 
 // What luaV_execute keeps while running a function.
 struct Frame {
@@ -46,7 +50,8 @@ private:
     void lowerTerminator(const Block& block);
 
     llvm::Value* projectOpHandler(const Node& node);
-    llvm::Value* slotAddress(Slot slot, size_t field);
+    llvm::Value* slotAddress(Slot slot, FieldOffset field);
+    llvm::BasicBlock* llvmBlock(const Block& block) const;
     void updateBase();
     void enter();
     void resume(const Block& block);
@@ -71,8 +76,8 @@ private:
     const Proto* proto = nullptr;
     llvm::Function* function = nullptr;
     Frame frame;
-    // Indexed by IR block ID; the entry is the resume dispatch.
-    std::vector<llvm::BasicBlock*> llvm_blocks;
+    // The entry's is the resume dispatch.
+    llvm::DenseMap<const Block*, llvm::BasicBlock*> llvm_blocks;
     // returns to luaV_execute, to interpret from the saved pc
     llvm::BasicBlock* interpret = nullptr;
 

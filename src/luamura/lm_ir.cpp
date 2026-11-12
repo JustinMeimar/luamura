@@ -1,5 +1,6 @@
 #include "lm_ir.h"
 #include "lm_effects.h"
+#include <llvm/ADT/Sequence.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/GenericDomTreeConstruction.h>
@@ -72,7 +73,7 @@ LmIR::LmIR(const Proto& proto) : proto(proto) {
 std::vector<PC> LmIR::buildBlocks() {
     std::vector<bool> leaders(proto.sizecode, false);
     leaders[0] = true;
-    for (PC pc = 0; pc < proto.sizecode; ++pc) {
+    for (PC pc : llvm::seq<PC>(0, proto.sizecode)) {
         auto next = successorPCs(proto, pc);
         if (next.size() == 1 && next[0] == pc + 1 && !isCall(proto, pc))
             continue;
@@ -83,7 +84,7 @@ std::vector<PC> LmIR::buildBlocks() {
     }
     std::vector<PC> ends(proto.sizecode);
     PC end = proto.sizecode;
-    for (PC pc = proto.sizecode - 1; pc >= 0; --pc) {
+    for (PC pc : llvm::reverse(llvm::seq<PC>(0, proto.sizecode))) {
         ends[pc] = end;
         if (leaders[pc])
             end = pc;
@@ -102,7 +103,7 @@ std::vector<PC> LmIR::buildBlocks() {
     Block& entry = addBlock();
     entry.terminator = Block::Terminator::Resume;
     std::vector<Block*> at(proto.sizecode, nullptr);
-    for (PC pc = 0; pc < proto.sizecode; ++pc) {
+    for (PC pc : llvm::seq<PC>(0, proto.sizecode)) {
         if (!reached[pc])
             continue;
         at[pc] = &addBlock();
@@ -137,15 +138,15 @@ void LmIR::addEdge(Block& from, Block& to) {
 
 Block& LmIR::splitBlock(Block& block, Block::iterator at) {
     Block& rest = addBlock();
-    rest.instructions.assign(at.wrapped(), block.instructions.cend());
-    block.instructions.erase(at.wrapped(), block.instructions.cend());
+    rest.instruction_ids.assign(at.wrapped(), block.instruction_ids.cend());
+    block.instruction_ids.erase(at.wrapped(), block.instruction_ids.cend());
     rest.terminator = block.terminator;
     rest.successors = std::move(block.successors);
     block.successors.clear();
     for (Block* next : rest.successors) {
         llvm::replace(next->predecessors, &block, &rest);
-        for (uint32_t id : next->phis)
-            for (PhiInput& in : nodes[id].incoming)
+        for (Node& phi : next->phis())
+            for (PhiInput& in : phi.incoming)
                 if (in.predecessor == &block)
                     in.predecessor = &rest;
     }
@@ -168,22 +169,22 @@ Block::Terminator LmIR::terminatorAt(PC last) const {
 }
 
 Node& LmIR::createNode(Node::Kind kind, PC pc) {
-    nodes.push_back({static_cast<uint32_t>(nodes.size()), kind});
+    nodes.push_back({static_cast<NodeID>(nodes.size()), kind});
     nodes.back().pc = pc;
     return nodes.back();
 }
 
 Node& LmIR::addNode(Block& block, Node::Kind kind, PC pc) {
     Node& node = createNode(kind, pc);
-    (kind == Node::Kind::Phi ? block.phis : block.instructions)
+    (kind == Node::Kind::Phi ? block.phi_ids : block.instruction_ids)
         .push_back(node.id);
     return node;
 }
 
 Block::iterator LmIR::insertNode(Block& block, Block::iterator at,
                                  Node::Kind kind) {
-    uint32_t id = createNode(kind, -1).id;
-    return {nodes, block.instructions.insert(at.wrapped(), id)};
+    NodeID id = createNode(kind, -1).id;
+    return {nodes, block.instruction_ids.insert(at.wrapped(), id)};
 }
 
 void LmIR::addOutput(Node& node, Slot slot) {
@@ -200,11 +201,11 @@ void LmIR::updateSSA() {
 
 void LmIR::buildNodes(const std::vector<PC>& ends) {
     Node& entry = addNode(getEntryBlock(), Node::Kind::FrameRead);
-    for (Slot slot = 0; slot < proto.maxstacksize; ++slot)
+    for (Slot slot : llvm::seq<Slot>(0, proto.maxstacksize))
         addOutput(entry, slot);
     EffectModel effects(*this);
     for (auto& block : llvm::drop_begin(blocks))
-        for (PC pc = block->start; pc < ends[block->start]; ++pc) {
+        for (PC pc : llvm::seq(block->start, ends[block->start])) {
             Node& node = addNode(*block, Node::Kind::Bytecode, pc);
             node.bytecode = proto.code[pc];
             effects.model(node);
@@ -212,13 +213,12 @@ void LmIR::buildNodes(const std::vector<PC>& ends) {
 }
 
 void LmIR::insertPhis(DominatorTree& dominators) {
-    for (Slot slot = 0; slot < proto.maxstacksize; ++slot) {
+    for (Slot slot : llvm::seq<Slot>(0, proto.maxstacksize)) {
         llvm::SmallPtrSet<Block*, 32> definitions, live;
         std::vector<Block*> work;
         for (auto& block : blocks) {
             bool defined = false;
-            for (uint32_t id : block->instructions) {
-                const Node& node = nodes[id];
+            for (const Node& node : *block) {
                 if (!defined &&
                     llvm::any_of(node.inputs, [&](const Operand& op) {
                         return op.slot == slot;
@@ -253,15 +253,15 @@ void LmIR::insertPhis(DominatorTree& dominators) {
 }
 
 bool LmIR::hasPhi(const Block& block, Slot slot) const {
-    return llvm::any_of(block.phis, [&](uint32_t id) {
-        return nodes[id].outputs.front().slot == slot;
+    return llvm::any_of(block.phis(), [&](const Node& phi) {
+        return phi.outputs.front().slot == slot;
     });
 }
 
 void LmIR::renameValues(DominatorTree& dominators) {
     for (auto& block : blocks)
-        for (uint32_t id : block->phis)
-            nodes[id].incoming.clear();
+        for (Node& phi : block->phis())
+            phi.incoming.clear();
     using State = std::vector<ValueID>;
     struct Visit {
         llvm::DomTreeNodeBase<Block>* tree;
@@ -278,20 +278,17 @@ void LmIR::renameValues(DominatorTree& dominators) {
             for (const Operand& op : node.outputs)
                 visit.state[op.slot] = op.value;
         };
-        for (uint32_t id : block->phis)
-            define(nodes[id]);
-        for (uint32_t id : block->instructions) {
-            Node& node = nodes[id];
+        for (const Node& phi : block->phis())
+            define(phi);
+        for (Node& node : *block) {
             for (Operand& op : node.inputs)
                 op.value = visit.state[op.slot];
             define(node);
         }
         for (Block* next : block->successors)
-            for (uint32_t id : next->phis) {
-                Node& phi = nodes[id];
+            for (Node& phi : next->phis())
                 phi.incoming.push_back(
                     {block, visit.state[phi.outputs.front().slot]});
-            }
         for (auto* child : *visit.tree)
             work.push_back({child, visit.state});
     }
@@ -317,9 +314,8 @@ void LmIR::printBlock(llvm::raw_ostream& out, const Block& block) const {
     for (auto [value, tag] : block.types)
         out << "  assumes %" << value << " has tag " << int32_t(tag)
             << "\n";
-    auto printNode = [&](uint32_t id) {
-        const Node& node = nodes[id];
-        out << "  n" << id << " ";
+    auto printNode = [&](const Node& node) {
+        out << "  n" << node.id << " ";
         for (const Operand& op : node.outputs)
             out << "%" << op.value << "[R" << op.slot << "] ";
         out << "= ";
@@ -351,10 +347,10 @@ void LmIR::printBlock(llvm::raw_ostream& out, const Block& block) const {
             out << " [runtime]";
         out << "\n";
     };
-    for (uint32_t id : block.phis)
-        printNode(id);
-    for (uint32_t id : block.instructions)
-        printNode(id);
+    for (const Node& phi : block.phis())
+        printNode(phi);
+    for (const Node& node : block)
+        printNode(node);
 }
 
 void LmIR::print(llvm::raw_ostream& out) const {

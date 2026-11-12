@@ -33,7 +33,7 @@ void CodeGenerator::updateBase() {
                         frame.base);
 }
 
-llvm::Value* CodeGenerator::slotAddress(Slot slot, size_t field) {
+llvm::Value* CodeGenerator::slotAddress(Slot slot, FieldOffset field) {
     return builder.CreateInBoundsPtrAdd(
         builder.CreateLoad(types.ptr, frame.base),
         builder.getInt64(slot * sizeof(StackValue) + field));
@@ -72,12 +72,16 @@ llvm::Value* CodeGenerator::projectOpHandler(const Node& node) {
     return call;
 }
 
+llvm::BasicBlock* CodeGenerator::llvmBlock(const Block& block) const {
+    return llvm_blocks.lookup(&block);
+}
+
 llvm::BasicBlock* CodeGenerator::createBlock(const llvm::Twine& name) {
     return llvm::BasicBlock::Create(context, name, function);
 }
 
 // The runtime attaches the functions to the chunk's Protos in preorder.
-static std::string lmFunctionName(size_t index) {
+static std::string lmFunctionName(FunctionIndex index) {
     return "lm_function_" + std::to_string(index);
 }
 
@@ -104,15 +108,15 @@ void CodeGenerator::lower(const LmIR& ir) {
     // named for reading the IR against the bytecode
     llvm_blocks.clear();
     for (const auto& block : ir.blocks)
-        llvm_blocks.push_back(
+        llvm_blocks[block.get()] =
             block->start < 0
                 ? createBlock()
-                : createBlock("pc" + llvm::Twine(block->start)));
+                : createBlock("pc" + llvm::Twine(block->start));
     interpret = createBlock();
 
     builder.SetInsertPoint(interpret);
     builder.CreateRet(frame.ci);
-    builder.SetInsertPoint(llvm_blocks.front());
+    builder.SetInsertPoint(llvmBlock(*ir.blocks.front()));
     enter();
 
     for (const auto& block : ir.blocks)
@@ -123,7 +127,7 @@ void CodeGenerator::lower(const LmIR& ir) {
 void CodeGenerator::lower(const Block& block) {
     this->block = &block;
     next = nullptr;
-    builder.SetInsertPoint(llvm_blocks[block.id]);
+    builder.SetInsertPoint(llvmBlock(block));
     for (const Node& node : block)
         lower(node);
     lowerTerminator(block);
@@ -155,8 +159,7 @@ void CodeGenerator::resume(const Block& block) {
     auto* saved = builder.CreateCall(runtime.lm_resume, {frame.ci});
     auto* to = builder.CreateSwitch(saved, interpret);
     for (const Block* target : block.successors)
-        to->addCase(builder.getInt32(target->start),
-                    llvm_blocks[target->id]);
+        to->addCase(builder.getInt32(target->start), llvmBlock(*target));
 }
 
 // Continues where the interpreter would after the block's last
@@ -168,15 +171,15 @@ void CodeGenerator::lowerTerminator(const Block& block) {
     case Block::Terminator::Branch:
         return toSuccessors(block);
     case Block::Terminator::Call:
-        return afterCall(llvm_blocks[block.successors.front()->id]);
+        return afterCall(llvmBlock(*block.successors.front()));
     case Block::Terminator::TailCall:
         return tailCall();
     case Block::Terminator::Return:
         builder.CreateRet(next);
         return;
     case Block::Terminator::Guard:
-        builder.CreateCondBr(next, llvm_blocks[block.successors[0]->id],
-                             llvm_blocks[block.successors[1]->id]);
+        builder.CreateCondBr(next, llvmBlock(*block.successors[0]),
+                             llvmBlock(*block.successors[1]));
         return;
     }
 }
@@ -185,17 +188,15 @@ void CodeGenerator::lowerTerminator(const Block& block) {
 void CodeGenerator::toSuccessors(const Block& block) {
     const std::vector<Block*>& targets = block.successors;
     if (targets.size() == 1) {
-        builder.CreateBr(llvm_blocks[targets.front()->id]);
+        builder.CreateBr(llvmBlock(*targets.front()));
         return;
     }
     auto* moved = builder.CreatePtrDiff(
         types.instruction, builder.CreateLoad(types.ptr, frame.pc),
         frame.code);
-    auto* to =
-        builder.CreateSwitch(moved, llvm_blocks[targets.front()->id]);
+    auto* to = builder.CreateSwitch(moved, llvmBlock(*targets.front()));
     for (const Block* target : llvm::drop_begin(targets))
-        to->addCase(builder.getInt64(target->start),
-                    llvm_blocks[target->id]);
+        to->addCase(builder.getInt64(target->start), llvmBlock(*target));
 }
 
 // A Lua callee is left for luaV_execute to run. A C function returned

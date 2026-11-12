@@ -6,6 +6,7 @@
 #include <llvm/ADT/GraphTraits.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/ADT/iterator.h>
+#include <llvm/ADT/iterator_range.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/GenericDomTree.h>
 #include <cstdint>
@@ -17,6 +18,8 @@
 namespace luamura {
 
 using PC = int32_t;
+using NodeID = uint32_t;
+using BlockID = uint32_t;
 using ValueID = uint32_t;
 using Slot = uint32_t;
 // a Lua type variant tag, such as LUA_VNUMINT
@@ -54,7 +57,7 @@ struct Node {
         Runtime,
     };
 
-    uint32_t id;
+    NodeID id;
     Kind kind;
     Effects effects = Effects::Frame;
     PC pc = -1;
@@ -65,7 +68,7 @@ struct Node {
 };
 
 struct Value {
-    uint32_t node;
+    NodeID node;
     Slot slot;
 };
 
@@ -73,7 +76,7 @@ struct Value {
 template <typename NodeT>
 class NodeIterator
     : public llvm::iterator_adaptor_base<
-          NodeIterator<NodeT>, std::vector<uint32_t>::const_iterator,
+          NodeIterator<NodeT>, std::vector<NodeID>::const_iterator,
           std::random_access_iterator_tag, NodeT> {
 public:
     using Nodes =
@@ -81,7 +84,7 @@ public:
                            std::vector<Node>>;
 
     NodeIterator() = default;
-    NodeIterator(Nodes& nodes, std::vector<uint32_t>::const_iterator id)
+    NodeIterator(Nodes& nodes, std::vector<NodeID>::const_iterator id)
         : NodeIterator::iterator_adaptor_base(id), nodes(&nodes) {}
 
     NodeT& operator*() const { return (*nodes)[*this->I]; }
@@ -111,7 +114,7 @@ struct Block {
     };
 
     LmIR* parent;
-    uint32_t id;
+    BlockID id;
     // the pc the block starts at, if the interpreter can be there
     PC start = -1;
     Terminator terminator = Terminator::Branch;
@@ -120,17 +123,20 @@ struct Block {
     llvm::DenseMap<ValueID, TypeTag> types;
     std::vector<Block*> predecessors;
     std::vector<Block*> successors;
-    std::vector<uint32_t> phis;
-    std::vector<uint32_t> instructions;
+    std::vector<NodeID> phi_ids;
+    std::vector<NodeID> instruction_ids;
 
+    // a block iterates its instructions
     iterator begin();
     iterator end();
     const_iterator begin() const;
     const_iterator end() const;
+    llvm::iterator_range<iterator> phis();
+    llvm::iterator_range<const_iterator> phis() const;
     Node& front() { return *begin(); }
     Node& back() { return *std::prev(end()); }
-    size_t size() const { return instructions.size(); }
-    bool empty() const { return instructions.empty(); }
+    size_t size() const { return instruction_ids.size(); }
+    bool empty() const { return instruction_ids.empty(); }
 
     LmIR* getParent() const { return parent; }
     void printAsOperand(llvm::raw_ostream& out, bool) const;
@@ -185,6 +191,9 @@ private:
 
 // A chunk's functions, in the preorder the runtime attaches them to
 // its Protos.
+// a function's position in its module
+using FunctionIndex = size_t;
+
 class LmModule {
 public:
     explicit LmModule(const Proto& main);
@@ -196,19 +205,29 @@ private:
 };
 
 inline Block::iterator Block::begin() {
-    return {parent->nodes, instructions.begin()};
+    return {parent->nodes, instruction_ids.begin()};
 }
 
 inline Block::iterator Block::end() {
-    return {parent->nodes, instructions.end()};
+    return {parent->nodes, instruction_ids.end()};
 }
 
 inline Block::const_iterator Block::begin() const {
-    return {parent->nodes, instructions.begin()};
+    return {parent->nodes, instruction_ids.begin()};
 }
 
 inline Block::const_iterator Block::end() const {
-    return {parent->nodes, instructions.end()};
+    return {parent->nodes, instruction_ids.end()};
+}
+
+inline llvm::iterator_range<Block::iterator> Block::phis() {
+    return {{parent->nodes, phi_ids.begin()},
+            {parent->nodes, phi_ids.end()}};
+}
+
+inline llvm::iterator_range<Block::const_iterator> Block::phis() const {
+    return {{parent->nodes, phi_ids.begin()},
+            {parent->nodes, phi_ids.end()}};
 }
 
 } // namespace luamura
