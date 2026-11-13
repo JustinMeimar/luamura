@@ -2,6 +2,7 @@
 #define LM_IR_H
 
 #include "lm_lua.h"
+#include <llvm/ADT/BitmaskEnum.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/GraphTraits.h>
 #include <llvm/ADT/Twine.h>
@@ -16,6 +17,8 @@
 #include <vector>
 
 namespace luamura {
+
+LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
 using PC = int32_t;
 using NodeID = uint32_t;
@@ -49,17 +52,25 @@ struct Node {
         // reloads the frame's base, which the stack moves with
         UpdateBase,
     };
-    // Each effect implies the ones before it.
-    enum class Effects {
-        Frame,
-        // reallocates the Lua stack, so the frame's base moves
-        MovesBase,
-        Runtime,
+    
+    ///NOTE(Justin): "implies the ones before it" ... ahh i don't
+    ///like using an implicit partial order in an enum, specially
+    /// with strangely named and poorly described enums.
+
+    // What a node does beyond its frame slot inputs and outputs.
+    enum class Effects : uint8_t {
+        None = 0,
+        // reallocates the Lua stack, so the frame's base must be reloaded
+        MovesBase = 1 << 0,
+        // runs Lua code, such as a callee, metamethod, __close or
+        // finalizer, which can change any captured slot
+        RunsLua = 1 << 1,
+        LLVM_MARK_AS_BITMASK_ENUM(RunsLua),
     };
 
     NodeID id;
     Kind kind;
-    Effects effects = Effects::Frame;
+    Effects effects = Effects::None;
     PC pc = -1;
     Instruction bytecode = 0;
     std::vector<Operand> inputs;
@@ -142,6 +153,11 @@ struct Block {
     void printAsOperand(llvm::raw_ostream& out, bool) const;
 };
 
+/// [LMDOC] LmIR is the SSA intermediate representation for Luamura.
+/// An instance of LmIR is constructed from a Lua function's `Proto`
+/// type, which analyzes the bytecode, extracts the CFG then applies
+/// the SSA construction algorithm.
+///
 class LmIR {
 public:
     using iterator = llvm::pointee_iterator<
@@ -187,6 +203,36 @@ private:
     bool hasPhi(const Block& block, Slot slot) const;
     void insertPhis(DominatorTree& dominators);
     void renameValues(DominatorTree& dominators);
+};
+
+// The frame slots each bytecode instruction reads and writes, and
+// whether it can move the frame or run Lua code. Lowering still runs each
+// instruction's handler, so the model describes the handlers in lvmops.h.
+class LmSlotModel {
+public:
+    explicit LmSlotModel(LmIR& ir);
+
+    void model(Node& node);
+
+private:
+    void findCapturedSlots();
+    bool reads(Slot slot) const;
+    bool writes(Slot slot) const;
+
+    void read(Slot slot);
+    void write(Slot slot);
+    void readRange(Slot from, Slot to);
+    void writeRange(Slot from, Slot to);
+    void movesBase();
+    void runsLua();
+    Slot upTo(uint32_t count, Slot end) const;
+
+    LmIR& ir;
+    Slot top;
+    // slots that closures capture, which Lua code can change through
+    // open upvalues
+    std::vector<Slot> captured;
+    Node* node = nullptr;
 };
 
 // A chunk's functions, in the preorder the runtime attaches them to

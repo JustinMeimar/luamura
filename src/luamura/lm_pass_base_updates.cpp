@@ -13,7 +13,7 @@ void BaseUpdates::run(LmIR& ir) {
             ir.insertNode(next, next.begin(), Node::Kind::UpdateBase);
         }
         for (auto it = block.begin(); it != block.end(); ++it) {
-            if (it->effects == Node::Effects::Frame)
+            if (!any(it->effects & Node::Effects::MovesBase))
                 continue;
             auto after = std::next(it);
             if (after == block.end() &&
