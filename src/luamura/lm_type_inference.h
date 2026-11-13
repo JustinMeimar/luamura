@@ -16,6 +16,11 @@ namespace luamura {
 TypeTag typeTransfer(const Proto& proto, Instruction i, Slot output,
                      llvm::function_ref<TypeTag(Slot)> typeOf);
 
+// Whether the tags of the registers a block's last node reads rule out
+// the edge to the successor.
+bool typesRuleOut(const Proto& proto, const Node& last, const Block& to,
+                  llvm::function_ref<TypeTag(Slot)> typeOf);
+
 // The tag each value has wherever it is used, where its definition
 // determines one.
 class TypeInference {
@@ -29,7 +34,6 @@ public:
 
 private:
     void infer(const Block& block, const Node& node);
-    bool skipsMetamethod(const Block& from, const Block& to) const;
     TypeTag joinIncoming(const Block& block, const Node& phi) const;
 
     const Proto& proto;

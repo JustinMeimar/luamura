@@ -3,25 +3,41 @@
 
 #include "lm_pass.h"
 #include "lm_type_inference.h"
-#include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/ADT/SmallVector.h>
+#include <optional>
+#include <utility>
+#include <vector>
 
 namespace luamura {
 
-// Guards ADD and ADDI operands of unknown type as integers, then keeps
-// the arithmetic after it on the guarded path while the known types rule
-// out each operation's metamethod.
-// TODO: only integers are guarded so far. Measure the operand types at
-// arithmetic sites across the benchmarks before generalizing.
+// A region runs from the function's entry, or a node that runs Lua, to
+// the next node that runs Lua. At its start a guard tests the types
+// predicted for the values it reads. The specialized channel copies the
+// region's nodes along the edges those types leave open; the generic
+// channel is the original nodes, for when the guard fails.
 class TypeSpecialization : public LmIRPass {
 public:
     void run(LmIR& ir) override;
 
 private:
-    // blocks a specialized chain already copies
-    using Covered = llvm::SmallPtrSet<const Block*, 16>;
+    struct Channel {
+        NodeID start;
+        // the registers the guard tests, read before the channel sets
+        // them, with the tag each is predicted to have
+        llvm::SmallVector<std::pair<Slot, TypeTag>, 4> guards;
+        std::vector<NodeID> nodes;
+        // the node that runs Lua, which the channel rejoins the generic
+        // channel before
+        std::optional<NodeID> stop;
+        // otherwise, how the channel's last node leaves it
+        Block::Terminator terminator = Block::Terminator::Branch;
+        std::vector<Block*> successors;
+    };
 
-    void specialize(LmIR& ir, const TypeInference& inference, Block& block,
-                    Covered& covered);
+    std::vector<NodeID> regionStarts(LmIR& ir) const;
+    Channel walk(LmIR& ir, const TypeInference& inference,
+                 NodeID start) const;
+    Block& specialize(LmIR& ir, const Channel& channel) const;
 };
 
 } // namespace luamura

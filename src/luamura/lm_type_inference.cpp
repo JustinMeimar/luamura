@@ -152,6 +152,18 @@ TypeTag typeTransfer(const Proto& proto, Instruction i, Slot output,
     return no_type;
 }
 
+// Arithmetic with a known result type never runs the metamethod
+// instruction after it.
+// TODO: tests and comparisons, whose operand types can decide them.
+bool typesRuleOut(const Proto& proto, const Node& last, const Block& to,
+                  llvm::function_ref<TypeTag(Slot)> typeOf) {
+    if (last.kind != Node::Kind::Bytecode ||
+        !isArithmetic(GET_OPCODE(last.bytecode)) || to.start != last.pc + 1)
+        return false;
+    Slot output = last.outputs.front().slot;
+    return typeTransfer(proto, last.bytecode, output, typeOf) != no_type;
+}
+
 // Visiting blocks in reverse postorder defines each value before its
 // uses, except along loops, where a phi's later inputs are not known.
 TypeInference::TypeInference(const LmIR& ir)
@@ -169,23 +181,17 @@ TypeInference::TypeInference(const LmIR& ir)
             types[phi.outputs.front().value] = joinIncoming(*block, phi);
         for (const Node& node : *block)
             infer(*block, node);
-        for (Block* next : block->successors)
-            if (!skipsMetamethod(*block, *next))
-                taken.insert({block, next});
+        for (Block* next : block->successors) {
+            if (!block->empty()) {
+                const Node& last = *std::prev(block->end());
+                if (typesRuleOut(proto, last, *next, [&](Slot slot) {
+                        return typeOf(*block, last, slot);
+                    }))
+                    continue;
+            }
+            taken.insert({block, next});
+        }
     }
-}
-
-// Arithmetic with a known result type never runs the metamethod
-// instruction after it.
-bool TypeInference::skipsMetamethod(const Block& from,
-                                    const Block& to) const {
-    if (from.empty())
-        return false;
-    const Node& last = *std::prev(from.end());
-    return last.kind == Node::Kind::Bytecode &&
-           isArithmetic(GET_OPCODE(last.bytecode)) &&
-           to.start == last.pc + 1 &&
-           types[last.outputs.front().value] != no_type;
 }
 
 TypeTag TypeInference::typeOf(const Block& block, const Node& node,
