@@ -33,11 +33,13 @@ void TypeSpecialization::specialize(LmIR& ir,
     // the tags of the registers the guarded path has set so far
     std::vector<TypeTag> types(ir.proto.maxstacksize, no_type);
     auto hotResultType = [&](const Block& source, const Node& node) {
-        return resultType(ir.proto, node.bytecode, [&](Slot slot) {
-            return types[slot] != no_type
-                       ? types[slot]
-                       : inference.typeOf(source, node, slot);
-        });
+        Slot output = node.outputs.front().slot;
+        return typeTransfer(
+            ir.proto, node.bytecode, output, [&](Slot slot) {
+                return types[slot] != no_type
+                           ? types[slot]
+                           : inference.typeOf(source, node, slot);
+            });
     };
     llvm::SmallVector<Operand, 2> guarded;
     for (const Operand& input : first.inputs) {

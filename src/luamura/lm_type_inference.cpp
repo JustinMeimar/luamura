@@ -26,33 +26,130 @@ static TypeTag arithmeticType(OpCode op, TypeTag left, TypeTag right) {
     return integers ? LUA_VNUMINT : LUA_VNUMFLT;
 }
 
-TypeTag resultType(const Proto& proto, Instruction i,
-                   llvm::function_ref<TypeTag(Slot)> typeOf) {
+static TypeTag arithmeticType(const Proto& proto, Instruction i,
+                              llvm::function_ref<TypeTag(Slot)> typeOf) {
     OpCode op = GET_OPCODE(i);
-    if (isArithmetic(op)) {
-        TypeTag left = typeOf(GETARG_B(i));
-        if (op >= OP_ADD)
-            return arithmeticType(op, left, typeOf(GETARG_C(i)));
-        if (op == OP_ADDI || op == OP_SHLI || op == OP_SHRI)
-            return arithmeticType(op, left, LUA_VNUMINT);
-        return arithmeticType(op, left, rawtt(&proto.k[GETARG_C(i)]));
-    }
+    TypeTag left = typeOf(GETARG_B(i));
+    if (op >= OP_ADD)
+        return arithmeticType(op, left, typeOf(GETARG_C(i)));
+    if (op == OP_ADDI || op == OP_SHLI || op == OP_SHRI)
+        return arithmeticType(op, left, LUA_VNUMINT);
+    return arithmeticType(op, left, rawtt(&proto.k[GETARG_C(i)]));
+}
+
+TypeTag typeTransfer(const Proto& proto, Instruction i, Slot output,
+                     llvm::function_ref<TypeTag(Slot)> typeOf) {
+    // the type when the instruction sets only R[A]
+    auto setsA = [&](TypeTag tag) {
+        return output == Slot(GETARG_A(i)) ? tag : no_type;
+    };
     LUAMURA_SWITCH(i) {
     LUAMURA_CASE(MOVE):
-        return typeOf(GETARG_B(i));
+        return setsA(typeOf(GETARG_B(i)));
     LUAMURA_CASE(LOADI):
-        return LUA_VNUMINT;
+        return setsA(LUA_VNUMINT);
     LUAMURA_CASE(LOADF):
-        return LUA_VNUMFLT;
+        return setsA(LUA_VNUMFLT);
     LUAMURA_CASE(LOADK):
-        return rawtt(&proto.k[GETARG_Bx(i)]);
+        return setsA(rawtt(&proto.k[GETARG_Bx(i)]));
     LUAMURA_CASE(LOADFALSE):
-        return LUA_VFALSE;
+    LUAMURA_CASE(LFALSESKIP):
+        return setsA(LUA_VFALSE);
     LUAMURA_CASE(LOADTRUE):
-        return LUA_VTRUE;
-    default:
+        return setsA(LUA_VTRUE);
+    LUAMURA_CASE(LOADNIL):
+        return LUA_VNIL;
+    LUAMURA_CASE(ADDI):
+    LUAMURA_CASE(ADDK):
+    LUAMURA_CASE(SUBK):
+    LUAMURA_CASE(MULK):
+    LUAMURA_CASE(MODK):
+    LUAMURA_CASE(POWK):
+    LUAMURA_CASE(DIVK):
+    LUAMURA_CASE(IDIVK):
+    LUAMURA_CASE(BANDK):
+    LUAMURA_CASE(BORK):
+    LUAMURA_CASE(BXORK):
+    LUAMURA_CASE(SHLI):
+    LUAMURA_CASE(SHRI):
+    LUAMURA_CASE(ADD):
+    LUAMURA_CASE(SUB):
+    LUAMURA_CASE(MUL):
+    LUAMURA_CASE(MOD):
+    LUAMURA_CASE(POW):
+    LUAMURA_CASE(DIV):
+    LUAMURA_CASE(IDIV):
+    LUAMURA_CASE(BAND):
+    LUAMURA_CASE(BOR):
+    LUAMURA_CASE(BXOR):
+    LUAMURA_CASE(SHL):
+    LUAMURA_CASE(SHR):
+        return setsA(arithmeticType(proto, i, typeOf));
+    // values from tables, upvalues, varargs, callees and metamethods,
+    // which only run time knows
+    LUAMURA_CASE(GETUPVAL):
+    LUAMURA_CASE(GETTABUP):
+    LUAMURA_CASE(GETTABLE):
+    LUAMURA_CASE(GETI):
+    LUAMURA_CASE(GETFIELD):
+    LUAMURA_CASE(MMBIN):
+    LUAMURA_CASE(MMBINI):
+    LUAMURA_CASE(MMBINK):
+    LUAMURA_CASE(CALL):
+    LUAMURA_CASE(TFORPREP):
+    LUAMURA_CASE(TFORCALL):
+    LUAMURA_CASE(VARARG):
+    LUAMURA_CASE(GETVARG):
+        return no_type;
+    // These set no registers of their own. Any captured registers they
+    // set, by running Lua, are unknown.
+    LUAMURA_CASE(SETUPVAL):
+    LUAMURA_CASE(SETTABUP):
+    LUAMURA_CASE(SETTABLE):
+    LUAMURA_CASE(SETI):
+    LUAMURA_CASE(SETFIELD):
+    LUAMURA_CASE(CLOSE):
+    LUAMURA_CASE(TBC):
+    LUAMURA_CASE(JMP):
+    LUAMURA_CASE(EQ):
+    LUAMURA_CASE(LT):
+    LUAMURA_CASE(LE):
+    LUAMURA_CASE(EQK):
+    LUAMURA_CASE(EQI):
+    LUAMURA_CASE(LTI):
+    LUAMURA_CASE(LEI):
+    LUAMURA_CASE(GTI):
+    LUAMURA_CASE(GEI):
+    LUAMURA_CASE(TEST):
+    LUAMURA_CASE(TAILCALL):
+    LUAMURA_CASE(RETURN):
+    LUAMURA_CASE(RETURN0):
+    LUAMURA_CASE(RETURN1):
+    LUAMURA_CASE(TFORLOOP):
+    LUAMURA_CASE(SETLIST):
+    LUAMURA_CASE(ERRNNIL):
+    LUAMURA_CASE(VARARGPREP):
+    LUAMURA_CASE(EXTRAARG):
+        return no_type;
+    // TODO: not yet modeled, though their operands' types can determine
+    // the types they set.
+    LUAMURA_CASE(LOADKX):
+    LUAMURA_CASE(SELF):
+    LUAMURA_CASE(UNM):
+    LUAMURA_CASE(BNOT):
+    LUAMURA_CASE(NOT):
+    LUAMURA_CASE(LEN):
+    LUAMURA_CASE(CONCAT):
+    LUAMURA_CASE(TESTSET):
+    LUAMURA_CASE(FORPREP):
+    LUAMURA_CASE(FORLOOP):
+    // TODO: these collect garbage after setting R[A], and a finalizer can
+    // change it if a closure captures it.
+    LUAMURA_CASE(NEWTABLE):
+    LUAMURA_CASE(CLOSURE):
         return no_type;
     }
+    return no_type;
 }
 
 // Visiting blocks in reverse postorder defines each value before its
@@ -103,11 +200,13 @@ TypeTag TypeInference::typeOf(const Block& block, const Node& node,
 }
 
 void TypeInference::infer(const Block& block, const Node& node) {
-    if (node.kind != Node::Kind::Bytecode || node.outputs.size() != 1)
+    if (node.kind != Node::Kind::Bytecode)
         return;
-    types[node.outputs.front().value] =
-        resultType(proto, node.bytecode,
-                   [&](Slot slot) { return typeOf(block, node, slot); });
+    for (const Operand& output : node.outputs)
+        types[output.value] =
+            typeTransfer(proto, node.bytecode, output.slot, [&](Slot slot) {
+                return typeOf(block, node, slot);
+            });
 }
 
 // Inputs along edges the analysis has ruled out do not reach the phi.

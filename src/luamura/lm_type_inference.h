@@ -9,11 +9,12 @@
 
 namespace luamura {
 
-// The tag of an instruction's result, given the tag of each register it
-// reads, or no_type if those do not determine it. Arithmetic has a
-// result tag exactly when its operands rule out the metamethod.
-TypeTag resultType(const Proto& proto, Instruction i,
-                   llvm::function_ref<TypeTag(Slot)> typeOf);
+// The type transfer function: the tag the instruction sets the output
+// register to, given the tag of each register it reads, or no_type if
+// those do not determine it. Arithmetic sets a tag exactly when its
+// operands rule out the metamethod.
+TypeTag typeTransfer(const Proto& proto, Instruction i, Slot output,
+                     llvm::function_ref<TypeTag(Slot)> typeOf);
 
 // The tag each value has wherever it is used, where its definition
 // determines one.
