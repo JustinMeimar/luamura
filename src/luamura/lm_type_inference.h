@@ -4,7 +4,6 @@
 #include "lm_ir.h"
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/STLFunctionalExtras.h>
-#include <llvm/ADT/SmallPtrSet.h>
 #include <vector>
 
 namespace luamura {
@@ -33,14 +32,15 @@ public:
     TypeTag typeOf(const Block& block, const Node& node, Slot slot) const;
 
 private:
-    void infer(const Block& block, const Node& node);
+    // whether the value's type changed
+    bool update(ValueID value, TypeTag type);
+    bool infer(const Block& block, const Node& node);
     TypeTag joinIncoming(const Block& block, const Node& phi) const;
 
     const Proto& proto;
     std::vector<TypeTag> types;
     // edges from reached blocks that the known types do not rule out
     llvm::DenseSet<std::pair<const Block*, const Block*>> taken;
-    llvm::SmallPtrSet<const Block*, 32> visited;
 };
 
 } // namespace luamura

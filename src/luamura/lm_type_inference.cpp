@@ -37,6 +37,19 @@ static TypeTag arithmeticType(const Proto& proto, Instruction i,
     return arithmeticType(op, left, rawtt(&proto.k[GETARG_C(i)]));
 }
 
+// An integer loop starts with integers, and other loops with floats.
+// A loop that runs no iterations leaves the registers as they were.
+static TypeTag forPrepType(Instruction i, Slot output,
+                           llvm::function_ref<TypeTag(Slot)> typeOf) {
+    Slot a = GETARG_A(i);
+    bool integers =
+        typeOf(a) == LUA_VNUMINT && typeOf(a + 2) == LUA_VNUMINT;
+    TypeTag entered = integers ? LUA_VNUMINT : LUA_VNUMFLT;
+    if (integers && output != a + 1)
+        return LUA_VNUMINT;
+    return typeOf(output) == entered ? entered : no_type;
+}
+
 TypeTag typeTransfer(const Proto& proto, Instruction i, Slot output,
                      llvm::function_ref<TypeTag(Slot)> typeOf) {
     // the type when the instruction sets only R[A]
@@ -85,6 +98,11 @@ TypeTag typeTransfer(const Proto& proto, Instruction i, Slot output,
     LUAMURA_CASE(SHL):
     LUAMURA_CASE(SHR):
         return setsA(arithmeticType(proto, i, typeOf));
+    LUAMURA_CASE(FORPREP):
+        return forPrepType(i, output, typeOf);
+    // The loop changes values but not tags.
+    LUAMURA_CASE(FORLOOP):
+        return typeOf(output);
     // values from tables, upvalues, varargs, callees and metamethods,
     // which only run time knows
     LUAMURA_CASE(GETUPVAL):
@@ -141,8 +159,6 @@ TypeTag typeTransfer(const Proto& proto, Instruction i, Slot output,
     LUAMURA_CASE(LEN):
     LUAMURA_CASE(CONCAT):
     LUAMURA_CASE(TESTSET):
-    LUAMURA_CASE(FORPREP):
-    LUAMURA_CASE(FORLOOP):
     // TODO: these collect garbage after setting R[A], and a finalizer can
     // change it if a closure captures it.
     LUAMURA_CASE(NEWTABLE):
@@ -165,31 +181,36 @@ bool typesRuleOut(const Proto& proto, const Node& last, const Block& to,
 }
 
 // Visiting blocks in reverse postorder defines each value before its
-// uses, except along loops, where a phi's later inputs are not known.
+// uses, except along loops. Inputs along edges not yet taken are left
+// out of phis, and the visits repeat until no type or edge changes.
 TypeInference::TypeInference(const LmIR& ir)
     : proto(ir.proto), types(ir.values.size(), no_type) {
-    for (const Block* block :
-         llvm::ReversePostOrderTraversal<const LmIR*>(&ir)) {
-        visited.insert(block);
-        bool reached = block == ir.blocks.front().get() ||
-                       llvm::any_of(block->predecessors, [&](Block* from) {
-                           return taken.contains({from, block});
-                       });
-        if (!reached)
-            continue;
-        for (const Node& phi : block->phis())
-            types[phi.outputs.front().value] = joinIncoming(*block, phi);
-        for (const Node& node : *block)
-            infer(*block, node);
-        for (Block* next : block->successors) {
-            if (!block->empty()) {
-                const Node& last = *std::prev(block->end());
-                if (typesRuleOut(proto, last, *next, [&](Slot slot) {
-                        return typeOf(*block, last, slot);
-                    }))
-                    continue;
+    llvm::ReversePostOrderTraversal<const LmIR*> order(&ir);
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (const Block* block : order) {
+            bool reached =
+                block == ir.blocks.front().get() ||
+                llvm::any_of(block->predecessors, [&](Block* from) {
+                    return taken.contains({from, block});
+                });
+            if (!reached)
+                continue;
+            for (const Node& phi : block->phis())
+                changed |= update(phi.outputs.front().value,
+                                  joinIncoming(*block, phi));
+            for (const Node& node : *block)
+                changed |= infer(*block, node);
+            for (Block* next : block->successors) {
+                if (!block->empty()) {
+                    const Node& last = *std::prev(block->end());
+                    if (typesRuleOut(proto, last, *next, [&](Slot slot) {
+                            return typeOf(*block, last, slot);
+                        }))
+                        continue;
+                }
+                changed |= taken.insert({block, next}).second;
             }
-            taken.insert({block, next});
         }
     }
 }
@@ -205,23 +226,31 @@ TypeTag TypeInference::typeOf(const Block& block, const Node& node,
                                         : types[input->value];
 }
 
-void TypeInference::infer(const Block& block, const Node& node) {
-    if (node.kind != Node::Kind::Bytecode)
-        return;
-    for (const Operand& output : node.outputs)
-        types[output.value] =
-            typeTransfer(proto, node.bytecode, output.slot, [&](Slot slot) {
-                return typeOf(block, node, slot);
-            });
+bool TypeInference::update(ValueID value, TypeTag type) {
+    if (types[value] == type)
+        return false;
+    types[value] = type;
+    return true;
 }
 
-// Inputs along edges the analysis has ruled out do not reach the phi.
+bool TypeInference::infer(const Block& block, const Node& node) {
+    if (node.kind != Node::Kind::Bytecode)
+        return false;
+    bool changed = false;
+    for (const Operand& output : node.outputs)
+        changed |= update(
+            output.value,
+            typeTransfer(proto, node.bytecode, output.slot, [&](Slot slot) {
+                return typeOf(block, node, slot);
+            }));
+    return changed;
+}
+
 TypeTag TypeInference::joinIncoming(const Block& block,
                                     const Node& phi) const {
     auto reaching =
         llvm::make_filter_range(phi.incoming, [&](const PhiInput& in) {
-            return !visited.contains(in.predecessor) ||
-                   taken.contains({in.predecessor, &block});
+            return taken.contains({in.predecessor, &block});
         });
     // NOTE(Justin): At some point here, we might consider a type
     // latice where several incoming types recieve an entailing
