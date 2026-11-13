@@ -20,7 +20,22 @@ CodeGenerator::CodeGenerator(llvm::Module& module,
       bytecode(bytecode), types(context), runtime(module, types) {}
 
 void CodeGenerator::lowerBytecode(const Node& node) {
+    assumeInputTypes(node);
     next = projectOpHandler(node);
+}
+
+// Tells LLVM the input tags the analysis knows, which the handler's
+// type tests would otherwise load and check at run time.
+void CodeGenerator::assumeInputTypes(const Node& node) {
+    for (const Operand& input : node.inputs) {
+        TypeTag tag = inference->typeOf(*block, node, input.slot);
+        if (tag == no_type)
+            continue;
+        auto* loaded = builder.CreateLoad(
+            types.i8, slotAddress(input.slot, offsetof(TValue, tt_)));
+        builder.CreateAssumption(
+            builder.CreateICmpEQ(loaded, builder.getInt8(tag)));
+    }
 }
 
 void CodeGenerator::updateBase() {
@@ -100,6 +115,7 @@ void CodeGenerator::lower(const LmModule& module) {
 
 void CodeGenerator::lower(const LmIR& ir) {
     proto = &ir.proto;
+    inference = std::make_unique<TypeInference>(ir);
     function = llvm::Function::Create(
         types.aot_function, llvm::GlobalValue::InternalLinkage,
         lmFunctionName(functions.size()), module);

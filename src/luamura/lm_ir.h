@@ -25,9 +25,11 @@ using NodeID = uint32_t;
 using BlockID = uint32_t;
 using ValueID = uint32_t;
 using Slot = uint32_t;
-// a Lua type variant tag, such as LUA_VNUMINT
+// the tag a TValue stores, such as LUA_VNUMINT
 using TypeTag = uint8_t;
 constexpr ValueID no_value = UINT32_MAX;
+// not a Lua tag, for a value whose tag is not known
+constexpr TypeTag no_type = UINT8_MAX;
 class LmIR;
 struct Block;
 
@@ -306,6 +308,18 @@ struct GraphTraits<Inverse<luamura::Block*>>
     }
 };
 
+template <> struct GraphTraits<const luamura::Block*> {
+    using NodeRef = const luamura::Block*;
+    using ChildIteratorType = std::vector<luamura::Block*>::const_iterator;
+    static NodeRef getEntryNode(NodeRef block) { return block; }
+    static ChildIteratorType child_begin(NodeRef block) {
+        return block->successors.begin();
+    }
+    static ChildIteratorType child_end(NodeRef block) {
+        return block->successors.end();
+    }
+};
+
 template <>
 struct GraphTraits<luamura::LmIR*> : GraphTraits<luamura::Block*> {
     using nodes_iterator = pointer_iterator<luamura::LmIR::iterator>;
@@ -319,6 +333,14 @@ struct GraphTraits<luamura::LmIR*> : GraphTraits<luamura::Block*> {
         return nodes_iterator(function->end());
     }
     static size_t size(luamura::LmIR* function) { return function->size(); }
+};
+
+template <>
+struct GraphTraits<const luamura::LmIR*>
+    : GraphTraits<const luamura::Block*> {
+    static NodeRef getEntryNode(const luamura::LmIR* function) {
+        return function->blocks.front().get();
+    }
 };
 
 } // namespace llvm

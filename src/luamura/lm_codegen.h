@@ -4,6 +4,7 @@
 #include "lm_ir.h"
 #include "lm_lua.h"
 #include "lm_runtime.h"
+#include "lm_type_inference.h"
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -46,6 +47,7 @@ private:
     void lower(const Block& block);
     void lower(const Node& node);
     void lowerBytecode(const Node& node);
+    void assumeInputTypes(const Node& node);
     void lowerGuard(const Node& node);
     void lowerTerminator(const Block& block);
 
@@ -74,6 +76,7 @@ private:
 
     // the function being lowered
     const Proto* proto = nullptr;
+    std::unique_ptr<TypeInference> inference;
     llvm::Function* function = nullptr;
     Frame frame;
     // The entry's is the resume dispatch.

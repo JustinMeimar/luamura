@@ -25,6 +25,12 @@ namespace luamura {
 // programs embed for the runtime to load.
 using GuestBytecode = std::vector<uint8_t>;
 
+// Arithmetic skips the metamethod instruction after it, unless its
+// operands need one.
+inline bool isArithmetic(OpCode op) {
+    return op >= OP_ADDI && op <= OP_SHR;
+}
+
 } // namespace luamura
 
 #define LUAMURA_SWITCH(i) switch (GET_OPCODE(i))

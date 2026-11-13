@@ -57,9 +57,7 @@ static std::vector<PC> successorPCs(const Proto& proto, PC pc) {
     LUAMURA_CASE(SETLIST):
         return {TESTARG_k(i) ? next + 1 : next};
     default:
-        // arithmetic skips the metamethod call after it, unless its
-        // operands need one
-        if (op >= OP_ADDI && op <= OP_SHR)
+        if (isArithmetic(op))
             return {next + 1, next};
         return {next};
     }
@@ -445,7 +443,7 @@ void LmSlotModel::model(Node& node) {
     uint32_t b = GETARG_B(i);
     uint32_t c = GETARG_C(i);
 
-    if (op >= OP_ADDI && op <= OP_SHR) {
+    if (isArithmetic(op)) {
         read(b);
         if (op >= OP_ADD)
             read(c);

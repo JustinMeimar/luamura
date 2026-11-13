@@ -1,11 +1,11 @@
 #include "lm_pass_type_specialization.h"
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
-#include <algorithm>
 
 namespace luamura {
 
 void TypeSpecialization::run(LmIR& ir) {
+    TypeInference inference(ir);
     // only the blocks from bytecode, as specializing adds more
     auto blocks =
         llvm::to_vector(llvm::make_pointer_range(llvm::drop_begin(ir)));
@@ -15,7 +15,7 @@ void TypeSpecialization::run(LmIR& ir) {
             continue;
         OpCode op = GET_OPCODE(block->back().bytecode);
         if (op == OP_ADD || op == OP_ADDI)
-            specialize(ir, *block, covered);
+            specialize(ir, inference, *block, covered);
     }
     ir.updateSSA();
     for (Block& block : ir) {
@@ -26,43 +26,50 @@ void TypeSpecialization::run(LmIR& ir) {
     }
 }
 
-bool TypeSpecialization::extendsChain(
-    const Node& node, const std::vector<bool>& integers) const {
-    if (node.kind != Node::Kind::Bytecode)
-        return false;
-    OpCode op = GET_OPCODE(node.bytecode);
-    if (op != OP_ADD && op != OP_ADDI && op != OP_SUB && op != OP_MUL)
-        return false;
-    return std::all_of(
-        node.inputs.begin(), node.inputs.end(),
-        [&](const Operand& input) { return integers[input.slot]; });
-}
-
-void TypeSpecialization::specialize(LmIR& ir, Block& block,
-                                    Covered& covered) {
+void TypeSpecialization::specialize(LmIR& ir,
+                                    const TypeInference& inference,
+                                    Block& block, Covered& covered) {
     Node first = block.back();
+    // the tags of the registers the guarded path has set so far
+    std::vector<TypeTag> types(ir.proto.maxstacksize, no_type);
+    auto hotResultType = [&](const Block& source, const Node& node) {
+        return resultType(ir.proto, node.bytecode, [&](Slot slot) {
+            return types[slot] != no_type
+                       ? types[slot]
+                       : inference.typeOf(source, node, slot);
+        });
+    };
+    llvm::SmallVector<Operand, 2> guarded;
+    for (const Operand& input : first.inputs) {
+        if (inference.typeOf(input.value) != no_type)
+            continue;
+        guarded.push_back(input);
+        types[input.slot] = LUA_VNUMINT;
+    }
+    if (hotResultType(block, first) == no_type)
+        return;
+
     Block& slow = ir.splitBlock(block, std::prev(block.end()));
     Block& hot = ir.addBlock();
-    ir.addNode(block, Node::Kind::Guard, first.pc).inputs = first.inputs;
+    ir.addNode(block, Node::Kind::Guard, first.pc)
+        .inputs.assign(guarded.begin(), guarded.end());
     block.terminator = Block::Terminator::Guard;
     ir.addEdge(block, hot);
     ir.addEdge(block, slow);
 
-    std::vector<bool> integers(ir.proto.maxstacksize, false);
-    for (const Operand& input : first.inputs)
-        integers[input.slot] = true;
     Block* source = &slow;
     Block* after = nullptr;
     // Bound duplication while measuring the benefit of longer paths.
     constexpr uint32_t maxOperations = 8;
     for (uint32_t count = 0; count < maxOperations; ++count) {
         Node original = source->back();
+        TypeTag result = hotResultType(*source, original);
         Node& copy = ir.addNode(hot, Node::Kind::Bytecode, original.pc);
         copy.bytecode = original.bytecode;
         copy.inputs = original.inputs;
         for (const Operand& output : original.outputs) {
             ir.addOutput(copy, output.slot);
-            integers[output.slot] = true;
+            types[output.slot] = result;
         }
         covered.insert(source);
         after = source->successors.front();
@@ -70,7 +77,10 @@ void TypeSpecialization::specialize(LmIR& ir, Block& block,
             after->terminator != Block::Terminator::Branch)
             break;
         const Node& next = after->front();
-        if (next.pc != original.pc + 2 || !extendsChain(next, integers))
+        if (next.kind != Node::Kind::Bytecode ||
+            !isArithmetic(GET_OPCODE(next.bytecode)) ||
+            next.pc != original.pc + 2 ||
+            hotResultType(*after, next) == no_type)
             break;
         source = after;
     }
