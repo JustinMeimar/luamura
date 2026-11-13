@@ -180,25 +180,47 @@ bool typesRuleOut(const Proto& proto, const Node& last, const Block& to,
     return typeTransfer(proto, last.bytecode, output, typeOf) != no_type;
 }
 
+TypeInference::TypeInference(const LmIR& ir)
+    : proto(ir.proto), types(ir.values.size(), no_type) {
+    inferFrom(*ir.blocks.front(), [](const Block&) { return true; });
+}
+
+TypeInference::TypeInference(
+    const TypeInference& before, const Block& entry,
+    llvm::function_ref<bool(const Block&)> within,
+    llvm::ArrayRef<std::pair<ValueID, TypeTag>> assumed)
+    : proto(before.proto), types(before.types) {
+    for (auto [value, type] : assumed)
+        types[value] = type;
+    inferFrom(entry, within);
+}
+
+bool TypeInference::takes(const Block& from, const Block& to) const {
+    return taken.contains({&from, &to});
+}
+
 // Visiting blocks in reverse postorder defines each value before its
 // uses, except along loops. Inputs along edges not yet taken are left
 // out of phis, and the visits repeat until no type or edge changes.
-TypeInference::TypeInference(const LmIR& ir)
-    : proto(ir.proto), types(ir.values.size(), no_type) {
-    llvm::ReversePostOrderTraversal<const LmIR*> order(&ir);
+void TypeInference::inferFrom(
+    const Block& entry, llvm::function_ref<bool(const Block&)> within) {
+    llvm::ReversePostOrderTraversal<const Block*> order(&entry);
     for (bool changed = true; changed;) {
         changed = false;
         for (const Block* block : order) {
-            bool reached =
-                block == ir.blocks.front().get() ||
+            bool reaches =
+                block == &entry ||
                 llvm::any_of(block->predecessors, [&](Block* from) {
                     return taken.contains({from, block});
                 });
-            if (!reached)
+            if (!reaches || !within(*block))
                 continue;
-            for (const Node& phi : block->phis())
-                changed |= update(phi.outputs.front().value,
-                                  joinIncoming(*block, phi));
+            reached.insert(block);
+            // the entry's phis are values from before it
+            if (block != &entry)
+                for (const Node& phi : block->phis())
+                    changed |= update(phi.outputs.front().value,
+                                      joinIncoming(*block, phi));
             for (const Node& node : *block)
                 changed |= infer(*block, node);
             for (Block* next : block->successors) {
@@ -221,9 +243,12 @@ TypeTag TypeInference::typeOf(const Block& block, const Node& node,
         node.inputs, [&](const Operand& op) { return op.slot == slot; });
     if (input == node.inputs.end())
         return no_type;
-    auto assumed = block.types.find(input->value);
-    return assumed != block.types.end() ? assumed->second
-                                        : types[input->value];
+    return typeIn(block, input->value);
+}
+
+TypeTag TypeInference::typeIn(const Block& block, ValueID value) const {
+    auto assumed = block.types.find(value);
+    return assumed != block.types.end() ? assumed->second : types[value];
 }
 
 bool TypeInference::update(ValueID value, TypeTag type) {
@@ -255,9 +280,12 @@ TypeTag TypeInference::joinIncoming(const Block& block,
     // NOTE(Justin): At some point here, we might consider a type
     // latice where several incoming types recieve an entailing
     // type-set.
-    TypeTag first = types[reaching.begin()->value];
+    auto typeAlong = [&](const PhiInput& in) {
+        return typeIn(*in.predecessor, in.value);
+    };
+    TypeTag first = typeAlong(*reaching.begin());
     bool same = llvm::all_of(reaching, [&](const PhiInput& in) {
-        return types[in.value] == first;
+        return typeAlong(in) == first;
     });
     return same ? first : no_type;
 }
