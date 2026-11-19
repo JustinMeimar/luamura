@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>luamura · AWFY history</title>
+<style>
+:root { color-scheme: light dark; font: 15px system-ui; --accent: #38a98b; }
+body.size { --accent: #cf657e; }
+body.size article { background: light-dark(#fff1f4, #302329);
+  border-color: light-dark(#f0c5cf, #65414b); }
+body.size .aggregate { border-color: var(--accent); }
+body.size line { stroke: light-dark(#eccbd3, #65414b); }
+body { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
+h1 { font-size: 26px; margin-bottom: 8px; }
+p, small { color: light-dark(#555, #aaa); }
+#plots { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+article { border: 1px solid light-dark(#ddd, #444); border-radius: 8px; padding: 14px; }
+h2 { font-size: 16px; margin: 0; }
+svg { width: 100%; overflow: visible; }
+text { fill: currentColor; font: 10px system-ui; }
+polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
+circle { fill: var(--accent); cursor: pointer; }
+circle:hover, circle:focus { stroke: currentColor; stroke-width: 2; outline: none; }
+.aggregate { border-color: var(--accent); }
+#tooltip { position: fixed; z-index: 1; pointer-events: none;
+  max-width: min(360px, calc(100vw - 32px)); padding: 12px;
+  border: 1px solid var(--accent); border-radius: 6px; white-space: pre-line;
+  background: light-dark(#fff, #202622); color: light-dark(#222, #eee);
+  font-size: 13px; box-shadow: 0 4px 20px #0003; }
+line { stroke: light-dark(#ccc, #555); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { text-align: left; padding: 8px; border-bottom: 1px solid light-dark(#ddd, #444); }
+.scroll { overflow-x: auto; margin-top: 24px; }
+select { margin: 12px 0 24px; padding: 6px; }
+</style>
+<h1>luamura / AWFY</h1>
+<p id="description"></p>
+<label>Metric <select id="metric">
+<option value="seconds">Speed</option>
+<option value="code_bytes">Code size</option>
+</select></label>
+<label>Horizontal axis <select id="axis">
+<option value="run">Run order (Lua baseline at t=0)</option>
+<option value="date">Measurement date (UTC)</option>
+</select></label>
+<p id="status">Loading history…</p>
+<div id="plots"></div>
+<div id="tooltip" role="tooltip" hidden></div>
+<div class="scroll"><table>
+<thead><tr><th>t</th><th>Engine / ref</th><th>Commit</th><th>Started (UTC)</th><th>Machine</th><th>Protocol</th></tr></thead>
+<tbody id="runs"></tbody>
+</table></div>
+<script>
+const $ = id => document.getElementById(id);
+const svgNS = 'http://www.w3.org/2000/svg';
+function element(tag, attrs = {}, text) {
+  const el = document.createElementNS(svgNS, tag);
+  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+function percent(ratio) {
+  if (!Number.isFinite(ratio)) return 'n/a';
+  const delta = (ratio - 1) * 100;
+  return (delta > 0 ? '+' : '') + delta.toFixed(2) + '%';
+}
+function compare(current, reference) {
+  return reference > 0 ? percent(current / reference) : 'n/a';
+}
+function tooltip(dot, text) {
+  dot.setAttribute('aria-label', text);
+  function show() {
+    const tip = $('tooltip');
+    tip.textContent = text;
+    tip.hidden = false;
+    const bounds = dot.getBoundingClientRect();
+    tip.style.left = Math.max(8, Math.min(bounds.left,
+      window.innerWidth - tip.offsetWidth - 8)) + 'px';
+    tip.style.top = Math.max(8, Math.min(bounds.bottom + 8,
+      window.innerHeight - tip.offsetHeight - 8)) + 'px';
+  }
+  function hide() { $('tooltip').hidden = true; }
+  dot.addEventListener('mouseenter', show);
+  dot.addEventListener('mouseleave', hide);
+  dot.addEventListener('focus', show);
+  dot.addEventListener('blur', hide);
+  dot.addEventListener('keydown', event => {
+    if (event.key === 'Escape') hide();
+  });
+}
+function aggregate(history, metric, baselineIndex) {
+  if (baselineIndex < 0) return history.map(() => null);
+  const baselineRun = history[baselineIndex];
+  const names = Object.keys(history[0].benchmarks);
+  return history.map(run => {
+    if (!names.length || !names.every(name => {
+      const b = run.benchmarks[name], baseline = baselineRun.benchmarks[name];
+      return b && b[metric] > 0 && baseline[metric] > 0 &&
+        b.source_sha256 === baseline.source_sha256 &&
+        b.inner_iterations === baseline.inner_iterations;
+    })) return null;
+    const value = Math.exp(names.reduce((sum, name) => sum +
+      Math.log(run.benchmarks[name][metric] /
+        baselineRun.benchmarks[name][metric]), 0) / names.length);
+    return {value, samples: [value]};
+  });
+}
+function render(history) {
+  $('tooltip').hidden = true;
+  $('plots').replaceChildren();
+  const metric = $('metric').value;
+  const size = metric === 'code_bytes';
+  const improvement = size ? 'smaller' : 'faster';
+  document.body.classList.toggle('size', size);
+  $('description').textContent = (size
+    ? 'Native .text bytes, including linked Lua runtime; excludes debug info and data. Lua baseline is the interpreter binary, excluding script source.'
+    : 'Wall time per outer repetition; bars show sample range.') +
+    ' Lower is better · hover for % change from baseline and previous run.';
+  $('status').textContent = history.length + ' entries · ' + (size
+    ? 'Missing size measurements are omitted.'
+    : 'Compare runs on the same machine and protocol; background load affects timings.');
+  const names = [...new Set(history.flatMap(run => Object.keys(run.benchmarks)))];
+  const dates = history.map(run => Date.parse(run.started_at));
+  const dateAxis = $('axis').value === 'date';
+  const values = dateAxis ? dates : history.map((_, i) => i);
+  const low = Math.min(...values), high = Math.max(...values);
+  const x = i => 48 + 232 * (values[i] - low) / (high - low || 1);
+  const baselineIndex = size ? history.findIndex(run =>
+    Object.keys(history[0].benchmarks).every(name =>
+      run.benchmarks[name]?.code_bytes > 0)) : 0;
+  const baselineLabel = size ? 'first measured size run' : 'Lua baseline';
+  const totals = aggregate(history, metric, baselineIndex);
+  for (const name of [null, ...names]) {
+    const total = name === null;
+    const measurements = total ? totals : history.map(run => {
+      const b = run.benchmarks[name];
+      if (!b || !(b[metric] > 0)) return null;
+      return {value: b[metric], samples: size ? [b[metric]] : b.samples};
+    });
+    const points = history.flatMap((run, i) =>
+      measurements[i] ? [{run, i, b: measurements[i]}] : []);
+    if (!points.length) continue;
+    const max = Math.max(...points.flatMap(p => p.b.samples)) * 1.1;
+    const min = total ? Math.min(...points.map(p => p.b.value)) * 0.9 : 0;
+    const y = value => 145 - 120 * (value - min) / (max - min);
+    const card = document.createElement('article');
+    const title = document.createElement('h2');
+    title.textContent = total ? 'All benchmarks · Δ ' + (size ? 'code size' : 'time') : name;
+    if (total) card.className = 'aggregate';
+    const svg = element('svg', {viewBox: '0 0 300 180', role: 'img',
+      'aria-label': total ? 'Aggregate percentage change from ' + baselineLabel :
+        name + (size ? ' code size in KiB' : ' time in milliseconds per repetition')});
+    for (let tick = 0; tick <= 3; tick++) {
+      const value = min + (max - min) * tick / 3;
+      svg.append(element('line', {x1: 48, x2: 280, y1: y(value), y2: y(value)}));
+      svg.append(element('text', {x: 42, y: y(value) + 3, 'text-anchor': 'end'},
+        total ? percent(value) : (size ? value / 1024 : value * 1000).toFixed(1)));
+    }
+    svg.append(element('text', {x: 4, y: 12}, total ? 'Δ %' : (size ? 'KiB' : 'ms')));
+    if (total) svg.append(element('line', {x1: 48, x2: 280,
+      y1: y(1), y2: y(1), 'stroke-dasharray': '4 3'}));
+    svg.append(element('polyline', {points: points.map(p =>
+      x(p.i) + ',' + y(p.b.value)).join(' ')}));
+    for (const {run, i, b} of points) {
+      if (!total && !size) svg.append(element('line', {x1: x(i), x2: x(i),
+        y1: y(Math.min(...b.samples)), y2: y(Math.max(...b.samples))}));
+      const dot = element('circle', {cx: x(i), cy: y(b.value), r: 4, tabindex: 0});
+      const details = [
+        't=' + i + ' · ' + run.label + ' · ' + run.git_head.slice(0, 12),
+        run.started_at,
+        'From ' + baselineLabel + ': ' +
+          compare(b.value, measurements[baselineIndex]?.value),
+        'From previous run: ' + compare(b.value, measurements[i - 1]?.value),
+        'Negative = ' + improvement + '.',
+        total ? 'Geometric mean across all ' +
+          Object.keys(history[0].benchmarks).length + ' baseline workloads.'
+          : size ? 'Code: ' + b.value.toLocaleString() + ' bytes (' +
+            (b.value / 1024).toFixed(2) + ' KiB)'
+          : 'Median: ' + (b.value * 1000).toFixed(3) + ' ms',
+        ...(total || size ? [] : ['Samples (ms): ' +
+          b.samples.map(s => (s * 1000).toFixed(3)).join(', ')])
+      ].join('\n');
+      tooltip(dot, details);
+      svg.append(dot);
+    }
+    for (const i of [...new Set([0, history.length - 1])]) {
+      svg.append(element('text', {x: x(i), y: 168, 'text-anchor': 'middle'},
+        dateAxis ? history[i].started_at.slice(5, 16).replace('T', ' ') : 't=' + i));
+    }
+    card.append(title, svg);
+    $('plots').append(card);
+  }
+}
+fetch('history.json').then(response => {
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return response.json();
+}).then(history => {
+  if (!history.length) {
+    $('status').textContent = 'No runs recorded yet.';
+    return;
+  }
+  for (const [i, run] of history.entries()) {
+    const row = document.createElement('tr');
+    for (const value of [i, run.engine + ' / ' + run.label,
+      run.git_head.slice(0, 12), run.started_at,
+      run.hostname + ' / ' + run.cpu,
+      run.runs + ' samples · ' + run.target_seconds + 's target']) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.append(cell);
+    }
+    $('runs').append(row);
+  }
+  $('axis').onchange = () => render(history);
+  $('metric').onchange = () => render(history);
+  render(history);
+}).catch(error => {
+  $('status').textContent = 'Could not load history: ' + error.message +
+    '. Serve this folder with: from the repository root, run python3 -m http.server 8765 --directory benchmarks';
+});
+</script>
+</html>

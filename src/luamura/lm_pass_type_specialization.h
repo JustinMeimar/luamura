@@ -19,6 +19,9 @@ public:
     void run(LmIR& ir) override;
 
 private:
+    /// A Channel is produced from a Basic Block and allows for infered types to
+    /// be propogated across instructions, so long as their effect does can not
+    /// possibly invalidate the assumption. 
     struct Channel {
         Block* start;
         // the values from before the region that the guard tests, with

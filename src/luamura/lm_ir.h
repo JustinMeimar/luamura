@@ -43,6 +43,11 @@ struct PhiInput {
     ValueID value;
 };
 
+struct Value {
+    NodeID node;
+    Slot slot;
+};
+
 struct Node {
     enum class Kind {
         FrameRead,
@@ -54,7 +59,7 @@ struct Node {
         // reloads the frame's base, which the stack moves with
         UpdateBase,
     };
-    
+
     ///NOTE(Justin): "implies the ones before it" ... ahh i don't
     ///like using an implicit partial order in an enum, specially
     /// with strangely named and poorly described enums.
@@ -78,11 +83,6 @@ struct Node {
     std::vector<Operand> inputs;
     std::vector<Operand> outputs;
     std::vector<PhiInput> incoming;
-};
-
-struct Value {
-    NodeID node;
-    Slot slot;
 };
 
 // Visits a block's instructions as nodes rather than as node IDs.
