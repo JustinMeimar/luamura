@@ -1,0 +1,8 @@
+print(tonumber("  10  "), tonumber("0x10"), tonumber("1e2"), tonumber("10.5"), tonumber(" -7 "))
+print(tonumber("inf"), tonumber("nan"), tonumber(""), tonumber("1 2"), tonumber("9223372036854775808"))
+print(tonumber("-0x1"), tonumber("0x1p4"), tonumber("0x"), tonumber("- 1"), tonumber("+1"))
+print(tonumber(".5"), tonumber("5."), tonumber("0x.1"), tonumber("1e+2"), tonumber("9223372036854775807"))
+print(tonumber("-9223372036854775808"), tonumber("0xffffffffffffffff"), tonumber("1\0"))
+print(tonumber("ff", 16), tonumber("zz", 36), tonumber("  -101  ", 2), tonumber("8", 8))
+print(tonumber(10), tonumber(1.5), tonumber(nil), tonumber({}), tonumber("1e", 10))
+print(pcall(tonumber, "10", 99))

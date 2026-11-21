@@ -597,6 +597,18 @@ typedef struct AbsLineInfo {
 */
 #define needvatab(p)	((p)->flag |= PF_VATAB)
 
+#if defined(LUAMURA)
+/*
+** Native code for a function, compiled by luamura. It returns the next
+** call to run instead of making it, so that calls do not grow the C
+** stack.
+*/
+struct CallInfo;
+typedef struct CallInfo *(*lua_AotFunction) (lua_State *L,
+                                             struct CallInfo *ci);
+#endif
+
+
 /*
 ** Function Prototypes
 */
@@ -623,6 +635,9 @@ typedef struct Proto {
   LocVar *locvars;  /* information about local variables (debug information) */
   TString  *source;  /* used for debug information */
   GCObject *gclist;
+#if defined(LUAMURA)
+  lua_AotFunction aot;
+#endif
 } Proto;
 
 /* }================================================================== */

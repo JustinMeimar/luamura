@@ -1,0 +1,16 @@
+build/
+out/
+
+*.o
+*.a
+*.so
+*.dylib
+
+output.c
+
+compile_commands.json
+.cache/
+.direnv/
+
+src/lua
+src/luac

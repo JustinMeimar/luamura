@@ -263,6 +263,9 @@ Proto *luaF_newproto (lua_State *L) {
   f->linedefined = 0;
   f->lastlinedefined = 0;
   f->source = NULL;
+#if defined(LUAMURA)
+  f->aot = NULL;
+#endif
   return f;
 }
 
